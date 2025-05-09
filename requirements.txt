@@ -29,3 +29,4 @@ wheel
 Cython
 nemo_toolkit[all]==1.23
 nltk==3.8.1
+seaborn

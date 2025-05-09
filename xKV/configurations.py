@@ -40,7 +40,10 @@ class LayerGroup:
     # SVD (if 'layer_merge_impl' == "svd")
     rank_k: Optional[int] = None
     rank_v: Optional[int] = None
-
+    
+    # SVD_kv (if 'layer_merge_impl' == "svd_kv_joint")
+    rank_kv: Optional[int] = None
+    
     # SLERP (if 'layer_merge_impl' == "slerp")
     slerp_t: Optional[float] = None
     slerp_gamma: Optional[float] = None
@@ -69,9 +72,9 @@ class xKVConfig:
     layer_merge_impl: str = "svd"  # "svd" or "slerp"
 
     # Global SVD defaults
-    rank_k: Optional[int] = None
-    rank_v: Optional[int] = None
-
+    rank_k: Optional[int] = None # For "svd" method
+    rank_v: Optional[int] = None # For "svd" method
+    rank_kv: Optional[int] = None  # For "svd_kv_joint" method
     # Global SLERP defaults
     slerp_t: float = 0.5
     slerp_gamma: float = 1.0
@@ -90,7 +93,7 @@ class xKVConfig:
 
     def __post_init__(self):
         # Validate the method
-        if self.layer_merge_impl not in ("svd", "slerp"):
+        if self.layer_merge_impl not in ("svd", "slerp", "svd_kv_joint"):
             raise ValueError(
                 f"Invalid layer_merge_impl '{self.layer_merge_impl}'. "
                 "Must be 'svd' or 'slerp'."
@@ -106,7 +109,15 @@ class xKVConfig:
                 # Nullify irrelevant fields
                 grp.slerp_t = None
                 grp.slerp_gamma = None
-
+        elif self.layer_merge_impl == "svd_kv_joint":
+            # Make sure each group has rank_kv set; clear slerp fields
+            for grp in self.layer_groups:
+                grp.rank_kv = grp.rank_kv if grp.rank_kv is not None else self.rank_kv
+                # Nullify irrelevant fields
+                grp.slerp_t = None
+                grp.slerp_gamma = None
+                grp.rank_k = None
+                grp.rank_v = None
         else:  # "slerp"
             # Make sure each group has slerp_t, slerp_gamma set; clear rank_k/rank_v
             for grp in self.layer_groups:
@@ -240,6 +251,7 @@ class xKVConfig:
         lines.append(f"  num_layers={self.num_layers},")
         lines.append(f"  layer_merge_impl={self.layer_merge_impl!r},")
         lines.append(f"  rank_k={self.rank_k!r}, rank_v={self.rank_v!r},")
+        lines.append(f"  rank_kv={self.rank_kv!r},")
         lines.append(f"  slerp_t={self.slerp_t!r}, slerp_gamma={self.slerp_gamma!r},")
         lines.append(f"  merge_key={self.merge_key}, merge_value={self.merge_value},")
         lines.append(f"  # {len(self.layer_groups)} groups:")
@@ -281,6 +293,7 @@ def generate_consecutive_xKV_config(
     group_size: int = 2,
     rank_k: Optional[int] = 256,
     rank_v: Optional[int] = 768,
+    rank_kv: Optional[int] = 512,
     slerp_t: float = 0.5,
     slerp_gamma: float = 1.0,
     merge_key: bool = True,
@@ -314,6 +327,7 @@ def generate_consecutive_xKV_config(
         layer_merge_impl=layer_merge_impl,
         rank_k=rank_k,
         rank_v=rank_v,
+        rank_kv=rank_kv,
         slerp_t=slerp_t,
         slerp_gamma=slerp_gamma,
         merge_key=merge_key,

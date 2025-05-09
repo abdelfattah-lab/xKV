@@ -76,6 +76,7 @@ def apply_kv_compress_patch(model, args, verbose=True) -> Tuple[Any, KVCompress]
             num_layers=model.config.num_hidden_layers,
             rank_k=args.rank_k,
             rank_v=args.rank_v,
+            rank_kv=args.rank_kv,
             group_size=args.layer_group_size,
             layer_merge_impl=args.layer_merge_impl,
             slerp_t=args.slerp_t,
@@ -102,6 +103,7 @@ def add_common_args(parser: argparse.ArgumentParser):
     # SVD-related parameters
     parser.add_argument("--rank_k", type=int, default=256, help="Rank for SVD compression of keys")
     parser.add_argument("--rank_v", type=int, default=768, help="Rank for SVD compression of values")
+    parser.add_argument("--rank_kv", type=int, default=512, help="Rank for joint SVD compression of keys and values")
     parser.add_argument(
         '--layer_group_size',
         type=int,

@@ -83,9 +83,10 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy i
 Below we provide the example commands for running the RULER benchmarks with different suppoted KV-Cache compression results.
 #### xKV 
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 and 768 for each grouped keys and values.
+
 ```
 # xKV-4
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 512 --rank_v 768 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 512 --rank_v 768 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### Single SVD

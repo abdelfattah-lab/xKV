@@ -180,6 +180,15 @@ class FakeLayerMergingCache(DynamicCache):
             # Step 4: Split and update the cache for each layer
             key_layers = torch.split(combined_key, split_sizes, dim=1)
             value_layers = torch.split(combined_value, split_sizes, dim=1)
+        elif self.merge_setup.layer_merge_impl == 'svd_kv_joint':
+            # Step 2: Concatenate along the sequence length dimension
+            combined_kv = torch.cat(keys+values, dim=1)
+            # Step 3: Apply fake SVD (truncate and multiply back)
+            combined_kv = fake_svd(combined_kv.float(), rank=group_info.rank_kv).to(combined_kv.dtype)
+            # Step 4: Split and update the cache for each layer
+            combined_layers = torch.split(combined_kv, split_sizes*2, dim=1)
+            key_layers = combined_layers[:len(keys)]
+            value_layers = combined_layers[len(keys):]
         elif self.merge_setup.layer_merge_impl == 'slerp':
             assert len(keys) == 2 and len(values) == 2, "SLERP only supports group size 2"
             if self.merge_setup.merge_key: 
@@ -197,7 +206,7 @@ class FakeLayerMergingCache(DynamicCache):
                 value_layers = values
 
         else:
-            raise NotImplementedError(f"Unknown implementation: {self.impl}")
+            raise NotImplementedError(f"Unknown implementation: {self.merge_setup.layer_merge_impl}")
         
         for idx, layer_idx in enumerate(range(start_layer_idx, end_layer_idx + 1)):
             self.update_cache(layer_idx, key_layers[idx], value_layers[idx])

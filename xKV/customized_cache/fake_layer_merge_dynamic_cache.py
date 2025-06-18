@@ -209,3 +209,7 @@ class FakeLayerMergingCache(DynamicCache):
         """Update the cache with the approximated key and value tensors."""
         self.key_cache[layer_idx] = key_approx
         self.value_cache[layer_idx] = value_approx
+    
+    def get_max_length(self):
+        # BC for DeepSeek-Coder-V2-Lite-Instruct
+        return None

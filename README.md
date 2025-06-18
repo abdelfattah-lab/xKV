@@ -49,7 +49,7 @@ Next, install dependency
 git submodule update --init --recursive
 uv pip install -r requirements.txt
 uv pip install flash-attn==2.7.4.post1 --no-build-isolation
-uv pip install -e 3rdparty/MInference
+uv pip install -e 3rdparty/MInference --no-build-isolation
 ```
 
 3. Create Datasets (for RULER evaluation only)
@@ -84,14 +84,14 @@ Below we provide the example commands for running the RULER benchmarks with diff
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 and 768 for each grouped keys and values.
 ```
 # xKV-4
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 512 --rank_v 768 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 256 --rank_v 384 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### Single SVD
 For evaluation of Single SVD under similar compression level, replacing the arguments `--layer_group_size 1` and `--rank_k 128 --rank_v_192`.
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 128 --rank_v 192 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 128 --rank_v 192 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### MiniCache
@@ -120,7 +120,7 @@ In our paper, we focus on compressing only the non-RoPE latents only.
 #### xKV for DeepSeek (compress only non-RoPE latents)
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 for grouped latents.
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 \
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 \
 evaluate/eval_acc.py \
 --datalen 65536 \
 --batch_size 1 \
@@ -128,8 +128,8 @@ evaluate/eval_acc.py \
 --model_name_or_path deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct \
 --xKV \
 --merge_k \
---rank_k 512 \
---layer_group_size 4 \
+--rank_k 64 \
+--layer_group_size 1 \
 --start_layer_idx 0 \
 --end_layer_idx -1 \
 --flash2

@@ -59,10 +59,10 @@ def xKV_qwen2_forward(
         ):
             sliding_window = self.config.sliding_window
 
-        if self.config._attn_implementation != "sdpa":
-            raise ValueError("Only sdpa is supported for now")
+        if self.config._attn_implementation not in ["sdpa", "flash_attention_2"]:
+            raise ValueError("Only sdpa/flash_attention_2 is supported for now")
        
-        attention_interface = ALL_ATTENTION_FUNCTIONS["sdpa"]
+        attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,

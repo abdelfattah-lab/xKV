@@ -10,8 +10,8 @@
 
 # Model and Tokenizer
 SEQ_LENGTHS=(
-    #65536
-    131072
+    65536
+    #131072
 )
 
 MODEL_NAME=$1

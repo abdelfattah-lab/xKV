@@ -51,10 +51,10 @@ def xKV_llama_forward(
                 key_states, _ = apply_rotary_pos_emb(key_states, key_states, cos, sin)
                 key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, mode='decode')
     
-        if self.config._attn_implementation != "sdpa":
-            raise ValueError("Only sdpa is supported for now")
-
-        attention_interface = ALL_ATTENTION_FUNCTIONS["sdpa"]
+        if self.config._attn_implementation not in ["sdpa", "flash_attention_2"]:
+            raise ValueError("Only sdpa/flash_attention_2 is supported for now")
+       
+        attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,

@@ -55,7 +55,7 @@ pip install flash-attn==2.7.4.post1 --no-build-isolation
 
 3. Create Datasets (for RULER evaluation only)
 ```
-python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+python -c "import nltk; nltk.download('punkt')"
 cd evaluate/data/ruler
 bash create_dataset.sh "meta-llama/Meta-Llama-3.1-8B-Instruct" "llama-3"
 ```

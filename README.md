@@ -76,6 +76,9 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy i
 
 > [!NOTE] 
 > When increasing the layer group size, you often need to adjust these ranks for a fair comparison. For instance, if you use `rank_k=128` for `layer_group_size=1`, then to compare performance under `layer_group_size=2`, set `rank_k=256` so that the average rank per layer is similar.
+
+> [!WARNING] 
+> When evaluting Qwen series, please pass `--flash2` to switch backend to FlashAttention 2. [ref](https://github.com/huggingface/transformers/issues/38002)
 ---
 
 ### Evaluation on RULER Benchmark

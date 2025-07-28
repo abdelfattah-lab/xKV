@@ -133,6 +133,33 @@ if __name__ == '__main__':
         )
         model = minference_patch(model)
     
+    if args.pyramidkv:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="pyramidkv",
+            attn_kwargs={
+                "max_capacity_prompt": 8192
+            }
+        )
+        model = minference_patch(model)
+    
+    # FIXME(max410011): KIVI patch is broken
+    if args.kivi:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="kivi",
+            attn_kwargs={
+                "bits": 2,
+                "group_size": 32,
+                "residual_length": 128
+            }
+        )
+        model = minference_patch(model)
+    
     for dataset_name in dataset_names:
         dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size)
         archive_path = os.path.join("temporary", model_name.split('/')[-1])
@@ -143,6 +170,10 @@ if __name__ == '__main__':
                 file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}.jsonl"
         elif args.snapKV:
             file_name = f"{dataset_name}_{datalen}_snapKV.jsonl"
+        elif args.pyramidkv:
+            file_name = f"{dataset_name}_{datalen}_pyramidkv.jsonl"
+        elif args.kivi:
+            file_name = f"{dataset_name}_{datalen}_kivi.jsonl"
         else:
             file_name = f"{dataset_name}_{datalen}.jsonl"
         archive_path = os.path.join(archive_path, file_name)

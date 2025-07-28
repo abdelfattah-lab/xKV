@@ -112,7 +112,7 @@ def needle_score(prediction, ground_truth):
     return score
 
 
-def count_score(prediction, ground_truth, **kwargs):
+def count_score(prediction, ground_truth):
     numbers = re.findall(r"\d+", prediction)
     right_num = 0
     for number in numbers:
@@ -121,7 +121,7 @@ def count_score(prediction, ground_truth, **kwargs):
     final_score = 0.0 if len(numbers) == 0 else right_num / len(numbers)
     return float(final_score)
 
-def retrieval_score(prediction, ground_truth, classes):
+def retrieval_score(prediction, ground_truth):
     pattern = r'Paragraph (\d+)'
     matches = re.findall(pattern, ground_truth)
     ground_truth_id = matches[0]
@@ -133,7 +133,7 @@ def retrieval_score(prediction, ground_truth, classes):
     final_score = 0.0 if len(numbers) == 0 else right_num / len(numbers)
     return float(final_score)
 
-def retrieval_zh_score(prediction, ground_truth, **kwargs):
+def retrieval_zh_score(prediction, ground_truth):
     pattern = r'段落(\d+)'
     matches = re.findall(pattern, ground_truth)
     ground_truth_id = matches[0]
@@ -145,7 +145,7 @@ def retrieval_zh_score(prediction, ground_truth, **kwargs):
     final_score = 0.0 if len(numbers) == 0 else right_num / len(numbers)
     return float(final_score)
 
-def code_sim_score(prediction, ground_truth, classes):
+def code_sim_score(prediction, ground_truth):
     all_lines = prediction.lstrip('\n').split('\n')
     prediction = ""
     for line in all_lines:
@@ -154,32 +154,8 @@ def code_sim_score(prediction, ground_truth, classes):
             break
     return (fuzz.ratio(prediction, ground_truth) / 100)
 
-def classification_score(prediction, ground_truth, **kwargs):
-    em_match_list = []
-    all_classes = kwargs["all_classes"]
-    for class_name in all_classes:
-        if class_name in prediction:
-            em_match_list.append(class_name)
-    for match_term in em_match_list:
-        if match_term in ground_truth and match_term != ground_truth:
-            em_match_list.remove(match_term)
-    if em_match_list != 0:
-        if ground_truth in em_match_list:
-            score = (1.0 / len(em_match_list))
-        else:
-            score = 0.0
-    else:
-        best_match = None
-        highest_similarity = 0
-        for string in all_classes:
-            similarity = difflib.SequenceMatcher(None, string, prediction).ratio()
-            if similarity > highest_similarity:
-                highest_similarity = similarity
-                best_match = string
-        score = float(best_match == ground_truth)
-    return score
     
-def rouge_score(prediction, ground_truth, **kwargs):
+def rouge_score(prediction, ground_truth):
     rouge = Rouge()
     try:
         scores = rouge.get_scores([prediction], [ground_truth], avg=True)
@@ -187,13 +163,13 @@ def rouge_score(prediction, ground_truth, **kwargs):
         return 0.0
     return scores["rouge-l"]["f"]
 
-def rouge_zh_score(prediction, ground_truth, **kwargs):
+def rouge_zh_score(prediction, ground_truth):
     prediction = " ".join(list(jieba.cut(prediction, cut_all=False)))
     ground_truth = " ".join(list(jieba.cut(ground_truth, cut_all=False))) 
     score = rouge_score(prediction, ground_truth)
     return score
 
-def f1_score(prediction, ground_truth, **kwargs):
+def f1_score(prediction, ground_truth):
     common = Counter(prediction) & Counter(ground_truth)
     num_same = sum(common.values())
     if num_same == 0:
@@ -203,7 +179,7 @@ def f1_score(prediction, ground_truth, **kwargs):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
-def qa_f1_score(prediction, ground_truth, **kwargs):
+def qa_f1_score(prediction, ground_truth):
     normalized_prediction = normalize_answer(prediction)
     normalized_ground_truth = normalize_answer(ground_truth)
 
@@ -212,7 +188,7 @@ def qa_f1_score(prediction, ground_truth, **kwargs):
     return f1_score(prediction_tokens, ground_truth_tokens)
 
 
-def qa_f1_zh_score(prediction, ground_truth, **kwargs):
+def qa_f1_zh_score(prediction, ground_truth):
     prediction_tokens = list(jieba.cut(prediction, cut_all=False))
     ground_truth_tokens = list(jieba.cut(ground_truth, cut_all=False))
     prediction_tokens = [normalize_zh_answer(token) for token in prediction_tokens]

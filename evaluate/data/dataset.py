@@ -29,7 +29,6 @@ from .metrics import (
     multi_words, 
     normalize_answer, 
     rouge_score,
-    classification_score,
     retrieval_score,
     code_sim_score,
 )
@@ -49,7 +48,7 @@ def f1_score_longbench(prediction, ground_truth):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
-def qa_f1_score_longbench(prediction, ground_truth, classes):
+def qa_f1_score_longbench(prediction, ground_truth):
     normalized_prediction = normalize_answer(prediction)
     normalized_ground_truth = normalize_answer(ground_truth)
 
@@ -78,7 +77,6 @@ METRICS_FN = {
     "long_bench/multi_news": rouge_score,
     "long_bench/triviaqa": qa_f1_score_longbench,
     "long_bench/samsum": rouge_score,
-    "long_bench/lsht": classification_score,
     "long_bench/passage_retrieval_en": retrieval_score,
     "long_bench/lcc": code_sim_score,
     "long_bench/repobench-p": code_sim_score,
@@ -106,7 +104,6 @@ GEN_LEN = {
     "long_bench/trec": 64,
     "long_bench/triviaqa": 32,
     "long_bench/samsum": 128,
-    "long_bench/lsht": 64,
     "long_bench/passage_count": 32,
     "long_bench/passage_retrieval_en": 32,
     "long_bench/passage_retrieval_zh": 32,
@@ -278,7 +275,7 @@ class Dataset:
         
         elif 'long_bench' in self.dataset_name:
             task = self.dataset_name.split('/')[-1]
-            dataset = load_dataset('THUDM/LongBench', task, split='test')
+            dataset = load_dataset('THUDM/LongBench', task, split='test', trust_remote_code=True)
             
             if self.num_samples > 0:
                 self.num_samples = min(self.num_samples, len(dataset))

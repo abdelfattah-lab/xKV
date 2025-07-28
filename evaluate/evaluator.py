@@ -63,7 +63,7 @@ class Evaluator:
                 rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
                 for (pred, gt, classes) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
-                    scores.append(max([dataset.metric(pred, g, classes) for g in gt]))
+                    scores.append(max([dataset.metric(pred, g) for g in gt]))
             elif 'niah_multiturn' in dataset.dataset_name:
                 # 1. Initial context (prefill and compress)
                 # NOTE(max410011): Use `generate` to get compressed KV-cache by calling `_prepare_cache_for_generation`

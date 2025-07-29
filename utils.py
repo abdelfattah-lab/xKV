@@ -98,7 +98,9 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument('--flash2', action='store_true', help='whether to use flash-attention2')
     parser.add_argument('--xKV', action='store_true', help='whether to enable xKV patch')
     parser.add_argument('--snapKV', action='store_true', help='whether to enable snapKV patch')
-
+    parser.add_argument('--pyramidkv', action='store_true', help='whether to enable pyramidkv patch')
+    # FIXME(max410011): KIVI patch is broken
+    parser.add_argument('--kivi', action='store_true', help='whether to enable KIVI patch')
 
     # online svd options
     # SVD-related parameters

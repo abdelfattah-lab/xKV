@@ -49,7 +49,7 @@ Next, install dependency
 git submodule update --init --recursive
 uv pip install -r requirements.txt
 uv pip install flash-attn==2.7.4.post1 --no-build-isolation
-uv pippip install -e 3rdparty/fast-hadamard-transform --no-build-isolation
+uv pip install -e 3rdparty/fast-hadamard-transform --no-build-isolation
 uv pip install -e 3rdparty/MInference --no-build-isolation
 cd 3rdparty/MInference
 git am ../0001-Change-KIVI-kernel-to-Triton-version.patch

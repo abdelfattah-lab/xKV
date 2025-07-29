@@ -155,7 +155,7 @@ if __name__ == '__main__':
             kv_type="kivi",
             attn_kwargs={
                 "bits": 2,
-                "group_size": 64,
+                "group_size": 128,
                 "residual_length": 128
             }
         )

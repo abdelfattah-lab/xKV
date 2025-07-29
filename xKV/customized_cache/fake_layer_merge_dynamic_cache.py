@@ -7,9 +7,32 @@ from transformers.models.mistral.modeling_mistral import (
 )
 
 from ..configurations import xKVConfig
+from .quant import Quantizer
+from .hadamard_utils import apply_hadamard
 
-def fake_svd(tensor, rank):
-    """Perform fake SVD: SVD -> Truncate -> Multiply back."""
+
+def fused_hadamard_matrix(self, A, B):
+        """
+        Apply Hadamard transform to matrices A and B.
+        For matrix product A @ B, we want: (Q @ A) @ (B @ Q^T) = Q @ A @ B @ Q^T = A @ B
+        when Q @ Q^T = I (orthogonal property of Hadamard matrix).
+        
+        A: First matrix (left operand)
+        B: Second matrix (right operand)  
+        Returns: (A_transformed, B_transformed) where A_transformed @ B_transformed preserves structure
+        """
+        # Apply Q to A (left multiplication)
+        A_transformed = apply_hadamard(A)
+        
+        # Apply Q^T to B (right multiplication: B @ Q^T)
+        # We want: B @ Q^T = (Q @ B^T)^T
+        # So: B @ Q^T = (Q @ B^T)^T = apply_hadamard(B.t()).t()
+        B_transformed = apply_hadamard(B.t()).t()
+        
+        return A_transformed, B_transformed
+
+def fake_svd(tensor, rank, apply_hadamard_transform=False, quantizer=None):
+    """Perform fake SVD: SVD -> Truncate -> (Optional Hadamard + Quantization) -> Multiply back."""
     bs, nh, sl, hd = tensor.shape
     tensor_reshaped = tensor.transpose(1, 2).reshape(bs, sl, nh * hd)
     
@@ -22,8 +45,46 @@ def fake_svd(tensor, rank):
     S_trunc = S[:, :rank]
     Vt_trunc = V_h[:, :rank, :]
     
-    # Step 2: Multiply back to approximate the original tensor
-    approx_tensor = torch.matmul(U_trunc, torch.matmul(torch.diag_embed(S_trunc), Vt_trunc)) # (bs, sl, nh * hd)
+    # Step 2: Split singular values evenly between U and V
+    sqrt_S = torch.sqrt(S_trunc)  # Square root for even distribution
+    U_scaled = U_trunc * sqrt_S.unsqueeze(1)  # Scale U with sqrt(S): (bs, sl, rank) * (bs, 1, rank)
+    Vt_scaled = sqrt_S.unsqueeze(-1) * Vt_trunc  # Scale Vt with sqrt(S): (bs, rank, 1) * (bs, rank, nh*hd)
+    
+    # Step 2.5: Apply Hadamard transform and quantization if requested
+    if apply_hadamard_transform:
+        # Apply Hadamard transform directly to batch tensors (no need to split)
+        # Reshape to 2D for Hadamard transform: (bs, sl, rank) -> (bs*sl, rank)
+        U_reshaped = U_scaled.reshape(bs * sl, rank)
+        # Reshape to 2D for Hadamard transform: (bs, rank, nh*hd) -> (bs*rank, nh*hd)
+        Vt_reshaped = Vt_scaled.reshape(bs * rank, nh * hd)
+        
+        # Apply Hadamard transform
+        U_hadamard = apply_hadamard(U_reshaped)
+        Vt_hadamard = apply_hadamard(Vt_reshaped.t()).t()  # B @ Q^T = (Q @ B^T)^T
+        
+        # Reshape back to original batch format
+        U_hadamard = U_hadamard.reshape(bs, sl, rank)
+        Vt_hadamard = Vt_hadamard.reshape(bs, rank, nh * hd)
+        
+        U_processed = U_hadamard
+        Vt_processed = Vt_hadamard
+    else:
+        U_processed = U_scaled
+        Vt_processed = Vt_scaled
+    
+    # Apply fake quantization if quantizer is provided
+    if quantizer is not None:
+        U_final = quantizer(U_processed)
+        Vt_final = quantizer(Vt_processed)
+    else:
+        U_final = U_processed
+        Vt_final = Vt_processed
+    
+    # Step 3: Multiply back to approximate the original tensor
+    approx_tensor = torch.matmul(U_final, Vt_final) # (bs, sl, nh * hd)
+    
+    # # Step 2: Multiply back to approximate the original tensor
+    # approx_tensor = torch.matmul(U_trunc, S_trunc.unsqueeze(-1) * Vt_trunc) # (bs, sl, nh * hd)
     approx_tensor = approx_tensor.view(bs, sl, nh, hd).transpose(1, 2)
     
     return approx_tensor
@@ -109,6 +170,16 @@ class FakeLayerMergingCache(DynamicCache):
         super().__init__()
         self.num_layers = merge_setup.num_layers
         self.merge_setup = merge_setup
+        
+        # Configure the Quantizer
+        if merge_setup.kv_bits < 16:
+            self.configure_quantizer(
+                kv_bits=merge_setup.kv_bits,
+                group_size=merge_setup.group_size,
+                sym=merge_setup.sym,
+                clip_ratio=merge_setup.clip_ratio,
+                hadamard=merge_setup.hadamard,
+            )
 
     def _should_merge(self, layer_idx):
         """Check if this layer is the last in its merge group using dictionary lookup."""
@@ -171,9 +242,19 @@ class FakeLayerMergingCache(DynamicCache):
             # Step 3: Apply fake SVD (truncate and multiply back)
             #NOTE(brian1009): Experiment with fake SVD on key only for now
             if self.merge_setup.merge_key:
-                combined_key = fake_svd(combined_key.float(), rank=group_info.rank_k).to(combined_key.dtype)
+                combined_key = fake_svd(
+                    combined_key.float(), 
+                    rank=group_info.rank_k,
+                    apply_hadamard_transform=getattr(self, 'use_hadamard', False),
+                    quantizer=self.quantizer if (hasattr(self, 'quantizer')) else None
+                ).to(combined_key.dtype)
             if self.merge_setup.merge_value:
-                combined_value = fake_svd(combined_value.float(), rank=group_info.rank_v).to(combined_value.dtype)
+                combined_value = fake_svd(
+                    combined_value.float(), 
+                    rank=group_info.rank_v,
+                    apply_hadamard_transform=getattr(self, 'use_hadamard', False),
+                    quantizer=self.quantizer if (hasattr(self, 'quantizer')) else None
+                ).to(combined_value.dtype)
 
             # Step 4: Split and update the cache for each layer
             key_layers = torch.split(combined_key, split_sizes, dim=1)
@@ -213,3 +294,15 @@ class FakeLayerMergingCache(DynamicCache):
     def get_max_length(self):
         # BC for DeepSeek-Coder-V2-Lite-Instruct
         return None
+
+    def configure_quantizer(self, 
+        kv_bits: int, 
+        group_size: int, 
+        sym: bool,
+        clip_ratio: float,
+        hadamard = False
+    ):
+        self.quantizer = Quantizer(kv_bits, group_size, sym, clip_ratio)
+        self.use_hadamard = hadamard
+    
+    

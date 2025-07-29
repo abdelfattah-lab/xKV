@@ -7,6 +7,11 @@ xKV_config:
   slerp_gamma: 0.05
   merge_key: true
   merge_value: true
+  kv_bits: 16
+  group_size: 0
+  sym: false
+  clip_ratio: 1.0
+  hadamard: true
   layer_groups:
   - layers:
     - 0

@@ -84,6 +84,12 @@ def apply_kv_compress_patch(model, args, verbose=True) -> Tuple[Any, KVCompress]
             merge_value=args.merge_value,
             start_layer=args.start_layer_idx,
             end_layer=args.end_layer_idx if args.end_layer_idx != -1 else model.config.num_hidden_layers - 1,
+            # Add quantization parameters
+            kv_bits=args.kv_bits,
+            quantizer_group_size=args.group_size,
+            sym=args.sym,
+            clip_ratio=args.clip_ratio,
+            hadamard=args.hadamard,
         )
         patch = KVCompress(xKV_config=xKV_config)
     
@@ -138,4 +144,12 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument("--start_layer_idx", type=int, default=0, help="The starting layer index for layer merging")
     parser.add_argument("--end_layer_idx", type=int, default=-1, help="The ending layer index for layer merging. If -1, it will be the last layer.")
     parser.add_argument('--customized_merge_config', type=str, help='custom config file')
+    
+    # Quantization parameters
+    parser.add_argument('--kv_bits', type=int, default=16, help='KV cache bit width, 16 means no quantization')
+    parser.add_argument('--group_size', type=int, default=0, help='Group size for quantization, 0 means per-token quantization')
+    parser.add_argument('--sym', action='store_true', help='Use symmetric quantization')
+    parser.add_argument('--clip_ratio', type=float, default=1.0, help='Clip ratio for quantization')
+    parser.add_argument('--hadamard', action='store_true', help='Use Hadamard transform for quantization')
+    
     return parser

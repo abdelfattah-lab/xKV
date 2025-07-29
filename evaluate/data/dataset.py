@@ -128,13 +128,14 @@ Templates = {
 }
 
 class Dataset:
-    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1):
+    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.datalen = datalen
         self.num_samples = num_samples
         self.rank = rank
         self.world_size = world_size
+        self.use_chat_template = use_chat_template
         self.is_sharded = False
 
         if dataset_name == 'niah':
@@ -286,19 +287,23 @@ class Dataset:
             classes = []
 
             for i in range(len(dataset)):
-                if 'llama-3' in self.tokenizer.name_or_path.lower():
-                    #model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif 'yi' in self.tokenizer.name_or_path.lower():
-                    # model_template = Templates['lwm'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif 'glm' in self.tokenizer.name_or_path.lower():
-                    # model_template = Templates['glm'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif "deepseek" in self.tokenizer.name_or_path.lower():
-                    model_template = LONG_BENCH_TEMPLATE[task]
+                if self.use_chat_template:
+                    if 'llama-3' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'yi' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['yi'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'glm' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['glm'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'qwen' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['qwen'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'phi' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['phi'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif "deepseek" in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['deepseek'].format(task_template=LONG_BENCH_TEMPLATE[task])
+                    else:
+                        raise Exception("Model not found for chat template", self.tokenizer.name_or_path)
                 else:
-                    raise Exception("Model not found", self.tokenizer.name_or_path)
+                    model_template = LONG_BENCH_TEMPLATE[task]
 
                 input_text = model_template.format(**dataset[i])
                 # import pdb; pdb.set_trace()

@@ -189,7 +189,7 @@ if __name__ == '__main__':
             if args.layer_merge_impl == "slerp":
                 file_name = f"{dataset_name}_{datalen}_minicache_{args.start_layer_idx}_to_{args.end_layer_idx}.jsonl"
             else:
-                file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bits_gs{args.group_size}_quantA.jsonl"
+                file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bits_gs{args.group_size}.jsonl"
         elif args.snapKV:
             file_name = f"{dataset_name}_{datalen}_snapKV.jsonl"
         elif args.pyramidkv:

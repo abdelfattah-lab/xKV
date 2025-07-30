@@ -8,7 +8,6 @@ from transformers.models.mistral.modeling_mistral import (
 
 from ..configurations import xKVConfig
 from .quant import Quantizer
-from .hadamard_utils import apply_hadamard
 
 
 def fused_hadamard_matrix(self, A, B):
@@ -59,6 +58,7 @@ def fake_svd(tensor, rank, apply_hadamard_transform=False, quantizer=None):
         Vt_reshaped = Vt_scaled.reshape(bs * rank, nh * hd)
         
         # Apply Hadamard transform
+        from .hadamard_utils import apply_hadamard
         U_hadamard = apply_hadamard(U_reshaped)
         Vt_hadamard = apply_hadamard(Vt_reshaped.t()).t()  # B @ Q^T = (Q @ B^T)^T
         
@@ -75,7 +75,9 @@ def fake_svd(tensor, rank, apply_hadamard_transform=False, quantizer=None):
     # Apply fake quantization if quantizer is provided
     if quantizer is not None:
         U_final = quantizer(U_processed)
-        Vt_final = quantizer(Vt_processed)
+        # We don't quantize Vt, because it's very small in long context scenario
+        # Vt_final = quantizer(Vt_processed)
+        Vt_final = Vt_processed
     else:
         U_final = U_processed
         Vt_final = Vt_processed

@@ -122,6 +122,19 @@ if __name__ == '__main__':
         from utils import apply_kv_compress_patch
         model = apply_kv_compress_patch(model, args)
 
+    if args.streamingllm:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="streamingllm",
+            attn_kwargs={
+                "n_local": 8064,
+                "n_init": 128
+            }
+        )
+        model = minference_patch(model)
+
     if args.snapKV:
         from minference import MInference
         minference_patch = MInference(
@@ -146,7 +159,6 @@ if __name__ == '__main__':
         )
         model = minference_patch(model)
     
-    # FIXME(max410011): KIVI patch is broken
     if args.kivi:
         from minference import MInference
         minference_patch = MInference(
@@ -158,6 +170,15 @@ if __name__ == '__main__':
                 "group_size": 128,
                 "residual_length": 128
             }
+        )
+        model = minference_patch(model)
+
+    if args.quest:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="quest",
         )
         model = minference_patch(model)
     
@@ -175,6 +196,10 @@ if __name__ == '__main__':
             file_name = f"{dataset_name}_{datalen}_pyramidkv.jsonl"
         elif args.kivi:
             file_name = f"{dataset_name}_{datalen}_kivi.jsonl"
+        elif args.streamingllm:
+            file_name = f"{dataset_name}_{datalen}_streamingllm.jsonl"
+        elif args.quest:
+            file_name = f"{dataset_name}_{datalen}_quest.jsonl"
         else:
             file_name = f"{dataset_name}_{datalen}.jsonl"
         archive_path = os.path.join(archive_path, file_name)

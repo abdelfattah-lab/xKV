@@ -108,7 +108,7 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument('--pyramidkv', action='store_true', help='whether to enable pyramidkv patch')
     parser.add_argument('--kivi', action='store_true', help='whether to enable KIVI patch')
     parser.add_argument('--quest', action='store_true', help='whether to enable Quest patch')
-    
+
 
     # online svd options
     # SVD-related parameters

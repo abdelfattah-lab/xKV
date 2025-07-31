@@ -179,6 +179,10 @@ if __name__ == '__main__':
             attn_type="dense", 
             model_name=model_name, 
             kv_type="quest",
+            attn_kwargs={
+                "chunk_size": 16,
+                "token_budget": 4096,
+            }
         )
         model = minference_patch(model)
     

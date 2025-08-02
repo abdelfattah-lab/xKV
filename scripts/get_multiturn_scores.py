@@ -13,8 +13,7 @@ def extract_xkv_index(filename):
 def process_jsonl_file(input_dir):
     jsonl_files = glob(os.path.join(input_dir, "**", "*multiturn*.jsonl"), recursive=True)
 
-    # 欄位
-    
+    # Field
     rows = []
 
     for jsonl_file in jsonl_files:
@@ -24,7 +23,7 @@ def process_jsonl_file(input_dir):
             if not lines:
                 continue
 
-            # 取最後一行並解析
+            # Use the last line to extract the correct answers
             last_data = json.loads(lines[-1])
             correct = last_data.get("correct", [])
             if len(correct) < 5:
@@ -53,7 +52,7 @@ def process_jsonl_file(input_dir):
 
 csv_fields = ["file", "round_1", "round_2", "round_3", "round_4", "round_5", "overall_avg"]
 
-# 路徑設定
+# Set input directory and output CSV file
 input_dir = "temporary/Meta-Llama-3.1-8B-Instruct/ruler"
 output_csv = "ruler_multiturn_results.csv"
 
@@ -61,7 +60,7 @@ results = process_jsonl_file(input_dir)
 results.sort(key=lambda r: r["file"])
 results.sort(key=lambda row: extract_xkv_index(row["file"]))
 
-# 輸出 CSV
+# Write results to CSV
 with open(output_csv, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=csv_fields)
     writer.writeheader()

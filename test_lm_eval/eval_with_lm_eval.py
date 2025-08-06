@@ -98,7 +98,7 @@ class XKVModel(HFLM):
             },
             'quest': {
                 'kv_type': 'quest',
-                'attn_kwargs': {"chunk_size": 16, "token_budget": 128}
+                'attn_kwargs': {"chunk_size": 16, "token_budget": 64}
             }
         }
         
@@ -159,16 +159,7 @@ class XKVModel(HFLM):
             from xKV.customized_cache import FakeLayerMergingCache
             
             # Get the xKV config from the model
-            if hasattr(self._model, 'kv_compress_config'):
-                config = self._model.kv_compress_config
-            else:
-                # Fallback: create a basic config
-                from xKV.configurations import xKVConfig
-                config = xKVConfig(
-                    num_layers=self._model.config.num_hidden_layers,
-                    rank_k=getattr(self.compression_args, 'rank_k', 64),
-                    rank_v=getattr(self.compression_args, 'rank_v', 64)
-                )
+            config = self._model.kv_compress_config
             
             # Create FakeLayerMergingCache for this call
             past_key_values = FakeLayerMergingCache(config)
@@ -186,7 +177,8 @@ class XKVModel(HFLM):
 def get_method_name(args: argparse.Namespace) -> str:
     """Determine the method name based on arguments."""
     if args.xKV:
-        return "xKV"
+        # Include layer group size in the method name for xKV variants
+        return f"xKV-{args.layer_group_size}"
     elif args.streamingllm:
         return "streamingllm"
     elif args.snapKV:
@@ -205,7 +197,8 @@ def get_output_filename(args: argparse.Namespace) -> str:
     model_name = args.model_name_or_path.split('/')[-1]
     
     if args.xKV:
-        method_name = f"xKV_k{args.rank_k}_v{args.rank_v}"
+        # Use the new naming convention: xKV-{group_size}_k{rank_k}_v{rank_v}
+        method_name = f"xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}"
         if args.kv_bits < 16:
             method_name += f"_{args.kv_bits}bit"
     else:

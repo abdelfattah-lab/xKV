@@ -122,69 +122,66 @@ if __name__ == '__main__':
         from utils import apply_kv_compress_patch
         model = apply_kv_compress_patch(model, args)
 
-    if args.streamingllm:
-        from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="streamingllm",
-            attn_kwargs={
-                "n_local": 8064,
-                "n_init": 128
-            }
-        )
-        model = minference_patch(model)
-
-    if args.snapKV:
-        from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="snapkv",
-            attn_kwargs={
-                "max_capacity_prompt": 8192
-            }
-        )
-        model = minference_patch(model)
+    # Determine budget based on dataset type (8k for RULER, 1k for LongBench)
+    is_ruler = any(dataset.startswith('ruler/') for dataset in dataset_names)
+    budget = 8192 if is_ruler else 1024
     
-    if args.pyramidkv:
-        from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="pyramidkv",
-            attn_kwargs={
-                "max_capacity_prompt": 8192
-            }
-        )
-        model = minference_patch(model)
+    # Configuration mapping for MInference methods
+    minference_configs = {
+        'streamingllm': {
+            'kv_type': 'streamingllm',
+            'attn_kwargs': {"n_local": budget - 32, "n_init": 32}
+        },
+        'snapKV': {
+            'kv_type': 'snapkv',
+            'attn_kwargs': {"max_capacity_prompt": budget}
+        },
+        'pyramidkv': {
+            'kv_type': 'pyramidkv',
+            'attn_kwargs': {"max_capacity_prompt": budget}
+        },
+        'kivi': {
+            'kv_type': 'kivi',
+            'attn_kwargs': {"bits": 2, "group_size": 128, "residual_length": 128}
+        },
+        'quest': {
+            'kv_type': 'quest',
+            'attn_kwargs': {"chunk_size": 16, "token_budget": budget // 2}
+        }
+    }
     
-    if args.kivi:
-        from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="kivi",
-            attn_kwargs={
-                "bits": 2,
-                "group_size": 128,
-                "residual_length": 128
-            }
-        )
-        model = minference_patch(model)
-
-    if args.quest:
-        from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="quest",
-            attn_kwargs={
-                "chunk_size": 16,
-                "token_budget": 4096,
-            }
-        )
-        model = minference_patch(model)
+    # Apply MInference patch based on arguments
+    for method, config in minference_configs.items():
+        if getattr(args, method, False):
+            from minference import MInference
+            attn_kwargs = config['attn_kwargs']
+            if method == 'kivi':
+                group_size = attn_kwargs.get('group_size', 'N/A')
+                residual_length = attn_kwargs.get('residual_length', 'N/A')
+                if dist_config.master_process:
+                    print(colored(f"Applying {method.upper()} with group_size: {group_size}, residual_length: {residual_length}...", "green"))
+            elif method == 'streamingllm':
+                n_init = attn_kwargs.get('n_init', 'N/A')
+                n_local = attn_kwargs.get('n_local', 'N/A')
+                if dist_config.master_process:
+                    print(colored(f"Applying {method.upper()} with n_init: {n_init}, n_local: {n_local}...", "green"))
+            else:
+                budget = (attn_kwargs.get('max_capacity_prompt') or 
+                          attn_kwargs.get('token_budget') or 
+                          attn_kwargs.get('n_local', 'N/A'))
+                dataset_type = 'RULER' if is_ruler else 'LongBench'
+                if dist_config.master_process:
+                    print(colored(f"Applying {method.upper()} with budget: {budget} (dataset type: {dataset_type})...", "green"))
+            minference_patch = MInference(
+                attn_type="dense",
+                model_name=model_name,
+                kv_type=config['kv_type'],
+                attn_kwargs=config['attn_kwargs']
+            )
+            model = minference_patch(model)
+            if dist_config.master_process:
+                print(colored(f"{method.upper()} applied successfully", "green"))
+            break
     
     for dataset_name in dataset_names:
         dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size, use_chat_template=args.use_chat_template)
@@ -223,9 +220,10 @@ if __name__ == '__main__':
             df.reset_index(drop=True)
             result = df[df["dataset"] == dataset_name]
             per_dataset_stats = result.to_dict(orient="records")[0]
-            print(colored(f"Results for {dataset_name}: {per_dataset_stats}", 'cyan'), )
-    
-        if dist_config.master_process:  
+            if dist_config.master_process:
+                print(colored(f"Results for {dataset_name}: {per_dataset_stats}", 'cyan'))
+
+        if dist_config.master_process:
             os.makedirs(os.path.join(args.result_dir, f"{benchmark_name}"), exist_ok=True)
             with open(os.path.join(args.result_dir, f"{benchmark_name}/{raw_model_name}.json"), "a") as f:
                 meta_data_to_log = {

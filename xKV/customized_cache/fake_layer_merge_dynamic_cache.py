@@ -9,27 +9,6 @@ from transformers.models.mistral.modeling_mistral import (
 from ..configurations import xKVConfig
 from .quant import Quantizer
 
-
-def fused_hadamard_matrix(self, A, B):
-        """
-        Apply Hadamard transform to matrices A and B.
-        For matrix product A @ B, we want: (Q @ A) @ (B @ Q^T) = Q @ A @ B @ Q^T = A @ B
-        when Q @ Q^T = I (orthogonal property of Hadamard matrix).
-        
-        A: First matrix (left operand)
-        B: Second matrix (right operand)  
-        Returns: (A_transformed, B_transformed) where A_transformed @ B_transformed preserves structure
-        """
-        # Apply Q to A (left multiplication)
-        A_transformed = apply_hadamard(A)
-        
-        # Apply Q^T to B (right multiplication: B @ Q^T)
-        # We want: B @ Q^T = (Q @ B^T)^T
-        # So: B @ Q^T = (Q @ B^T)^T = apply_hadamard(B.t()).t()
-        B_transformed = apply_hadamard(B.t()).t()
-        
-        return A_transformed, B_transformed
-
 def fake_svd(tensor, rank, apply_hadamard_transform=False, quantizer=None):
     """Perform fake SVD: SVD -> Truncate -> (Optional Hadamard + Quantization) -> Multiply back."""
     bs, nh, sl, hd = tensor.shape

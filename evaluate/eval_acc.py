@@ -87,6 +87,7 @@ def parse_args() -> Namespace:
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--datalen", type=int, default=64*1024, help="The length of the context.")
     p.add_argument("--result_dir", type=str, default="results")
+    p.add_argument("--use_chat_template", action="store_true", help="Whether to use chat template for long_bench tasks")
     return p.parse_args()
 
 if __name__ == '__main__':
@@ -120,14 +121,94 @@ if __name__ == '__main__':
     if args.xKV:
         from utils import apply_kv_compress_patch
         model = apply_kv_compress_patch(model, args)
+
+    if args.streamingllm:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="streamingllm",
+            attn_kwargs={
+                "n_local": 8064,
+                "n_init": 128
+            }
+        )
+        model = minference_patch(model)
+
+    if args.snapKV:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="snapkv",
+            attn_kwargs={
+                "max_capacity_prompt": 8192
+            }
+        )
+        model = minference_patch(model)
+    
+    if args.pyramidkv:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="pyramidkv",
+            attn_kwargs={
+                "max_capacity_prompt": 8192
+            }
+        )
+        model = minference_patch(model)
+    
+    if args.kivi:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="kivi",
+            attn_kwargs={
+                "bits": 2,
+                "group_size": 128,
+                "residual_length": 128
+            }
+        )
+        model = minference_patch(model)
+
+    if args.quest:
+        from minference import MInference
+        minference_patch = MInference(
+            attn_type="dense", 
+            model_name=model_name, 
+            kv_type="quest",
+            attn_kwargs={
+                "chunk_size": 16,
+                "token_budget": 4096,
+            }
+        )
+        model = minference_patch(model)
     
     for dataset_name in dataset_names:
-        dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size)
+        dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size, use_chat_template=args.use_chat_template)
         archive_path = os.path.join("temporary", model_name.split('/')[-1])
-        if not args.xKV:
-            file_name = f"{dataset_name}_{datalen}.jsonl"
+        if args.xKV:
+            if args.layer_merge_impl == "slerp":
+                file_name = f"{dataset_name}_{datalen}_minicache_{args.start_layer_idx}_to_{args.end_layer_idx}.jsonl"
+            else:
+                if args.kv_bits < 16:
+                    file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bits_gs{args.group_size}.jsonl"
+                else:
+                    file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}.jsonl"
+        elif args.snapKV:
+            file_name = f"{dataset_name}_{datalen}_snapKV.jsonl"
+        elif args.pyramidkv:
+            file_name = f"{dataset_name}_{datalen}_pyramidkv.jsonl"
+        elif args.kivi:
+            file_name = f"{dataset_name}_{datalen}_kivi.jsonl"
+        elif args.streamingllm:
+            file_name = f"{dataset_name}_{datalen}_streamingllm.jsonl"
+        elif args.quest:
+            file_name = f"{dataset_name}_{datalen}_quest.jsonl"
         else:
-            file_name = f"{dataset_name}_{datalen}_xKV.jsonl"
+            file_name = f"{dataset_name}_{datalen}.jsonl"
         archive_path = os.path.join(archive_path, file_name)
         evaluator.test(model, tokenizer, dataset, archive_path)
         

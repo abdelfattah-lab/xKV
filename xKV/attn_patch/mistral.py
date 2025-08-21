@@ -30,7 +30,7 @@ def xKV_mistral_forward(
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
-        is_prefill = q_len > 1 # assume auto-regressive
+        is_prefill = past_key_value is None or past_key_value.get_seq_length(self.layer_idx) == 0
 
         query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)

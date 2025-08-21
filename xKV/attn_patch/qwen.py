@@ -25,6 +25,7 @@ def xKV_qwen2_forward(
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
@@ -33,12 +34,22 @@ def xKV_qwen2_forward(
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
         cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        is_prefill = past_key_value is None or past_key_value.get_seq_length(self.layer_idx) == 0
+        #NOTE(brian1009): Skip the RoPE on key and only apply onto query for now.
+        query_states, _ = apply_rotary_pos_emb(query_states, query_states, cos, sin)
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            if is_prefill: # prefilling
+                #NOTE(brian1009): In our customized cache, we will perform different kind of compression methods
+                # To boost performance, we will not use the kv returned from the cache, but instead use the original KV
+                assert isinstance(past_key_value, FakeLayerMergingCache)
+                past_key_value.update(key_states, value_states, self.layer_idx, mode='prefill', cos=cos, sin=sin)
+                key_states, _ = apply_rotary_pos_emb(key_states, key_states, cos, sin)
+            else:
+                key_states, _ = apply_rotary_pos_emb(key_states, key_states, cos, sin)
+                key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, mode='decode')
 
         sliding_window = None
         if (
@@ -48,15 +59,10 @@ def xKV_qwen2_forward(
         ):
             sliding_window = self.config.sliding_window
 
-        if self.config._attn_implementation != "sdpa":
-            raise ValueError("Only sdpa is supported for now")
-        else:
-            if kwargs.get("output_attentions", False):
-                logger.warning_once(
-                    "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`."
-                )
-
-        attention_interface = ALL_ATTENTION_FUNCTIONS["sdpa"]
+        if self.config._attn_implementation not in ["sdpa", "flash_attention_2"]:
+            raise ValueError("Only sdpa/flash_attention_2 is supported for now")
+       
+        attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,

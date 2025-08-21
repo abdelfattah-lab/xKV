@@ -92,11 +92,14 @@ def main():
     # Add templates
     assert args.model_template_type in Templates, print(f'{args.model_template_type} is not found in {Templates.keys()}')
     model_template = Templates[args.model_template_type]    
-    task_template = config['template']
 
-    # Add answer prefix for all models
-    answer_prefix = config['answer_prefix'] if 'answer_prefix' in config else ''
-    config['template'] = model_template.format(task_template=task_template) + answer_prefix
+    if 'template' in config:
+        # Add answer prefix for all models
+        answer_prefix = config['answer_prefix'] if 'answer_prefix' in config else ''
+        config['template'] = model_template.format(task_template=config['template']) + answer_prefix
+    else:
+        # Add model template for all models
+        config['template_context'] = model_template.format(task_template=config['template_context'])
 
     # Split task into multiple chunks 
     chunks = [(args.num_samples // args.chunk_amount) + (1 if i < args.num_samples % args.chunk_amount else 0) for i in range(args.chunk_amount)]
@@ -122,7 +125,9 @@ def main():
         {additional_args} \
         {f"--remove_newline_tab" if args.remove_newline_tab else ""} \
         {f"--pre_samples {pre_samples}" if config['task'] == 'qa' else ""} \
-        --template "{config['template']}"
+        {f'--template "{config["template"]}"' if 'template' in config else ""} \
+        {f'--template_context "{config["template_context"]}"' if 'template_context' in config else ""} \
+        {f'--template_query "{config["template_query"]}"' if 'template_query' in config else ""}
         """
         print(command)
         result = subprocess.run(command, 

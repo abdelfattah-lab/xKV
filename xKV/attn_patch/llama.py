@@ -26,7 +26,6 @@ def xKV_llama_forward(
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         
-        bsz, q_len, _ = hidden_states.size()
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
 
@@ -35,7 +34,7 @@ def xKV_llama_forward(
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
         cos, sin = position_embeddings
-        is_prefill = q_len > 1 # assume auto-regressive
+        is_prefill = past_key_value is None or past_key_value.get_seq_length(self.layer_idx) == 0
         #NOTE(brian1009): Skip the RoPE on key and only apply onto query for now.
         query_states, _ = apply_rotary_pos_emb(query_states, query_states, cos, sin)
         
@@ -52,10 +51,10 @@ def xKV_llama_forward(
                 key_states, _ = apply_rotary_pos_emb(key_states, key_states, cos, sin)
                 key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, mode='decode')
     
-        if self.config._attn_implementation != "sdpa":
-            raise ValueError("Only sdpa is supported for now")
-
-        attention_interface = ALL_ATTENTION_FUNCTIONS["sdpa"]
+        if self.config._attn_implementation not in ["sdpa", "flash_attention_2"]:
+            raise ValueError("Only sdpa/flash_attention_2 is supported for now")
+       
+        attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,

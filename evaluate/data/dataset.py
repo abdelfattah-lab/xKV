@@ -29,7 +29,6 @@ from .metrics import (
     multi_words, 
     normalize_answer, 
     rouge_score,
-    classification_score,
     retrieval_score,
     code_sim_score,
 )
@@ -49,7 +48,7 @@ def f1_score_longbench(prediction, ground_truth):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
-def qa_f1_score_longbench(prediction, ground_truth, classes):
+def qa_f1_score_longbench(prediction, ground_truth):
     normalized_prediction = normalize_answer(prediction)
     normalized_ground_truth = normalize_answer(ground_truth)
 
@@ -78,7 +77,6 @@ METRICS_FN = {
     "long_bench/multi_news": rouge_score,
     "long_bench/triviaqa": qa_f1_score_longbench,
     "long_bench/samsum": rouge_score,
-    "long_bench/lsht": classification_score,
     "long_bench/passage_retrieval_en": retrieval_score,
     "long_bench/lcc": code_sim_score,
     "long_bench/repobench-p": code_sim_score,
@@ -106,7 +104,6 @@ GEN_LEN = {
     "long_bench/trec": 64,
     "long_bench/triviaqa": 32,
     "long_bench/samsum": 128,
-    "long_bench/lsht": 64,
     "long_bench/passage_count": 32,
     "long_bench/passage_retrieval_en": 32,
     "long_bench/passage_retrieval_zh": 32,
@@ -131,19 +128,22 @@ Templates = {
 }
 
 class Dataset:
-    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1):
+    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.datalen = datalen
         self.num_samples = num_samples
         self.rank = rank
         self.world_size = world_size
+        self.use_chat_template = use_chat_template
         self.is_sharded = False
 
         if dataset_name == 'niah':
             self.tokenized_prompts, self.gt, self.ctx_len, self.depth_pct = self.get_dataset()
         elif 'long_bench' in dataset_name:
             self.tokenized_prompts, self.gt, self.classes = self.get_dataset()
+        elif 'multiturn' in dataset_name:
+            self.tokenized_prompts, self.tokenized_queries, self.gt = self.get_dataset()
         else:
             self.tokenized_prompts, self.gt = self.get_dataset()
         
@@ -166,6 +166,9 @@ class Dataset:
             start = rank * shard_size
             end = start + shard_size if rank != world_size - 1 else self.num_samples
             shard_tokenized_prompts, shard_gt = self.tokenized_prompts[start:end], self.gt[start:end]
+            if 'multiturn' in self.dataset_name:
+                shard_tokenized_queries = self.tokenized_queries[start:end]
+                self.tokenized_queries = shard_tokenized_queries
             self.tokenized_prompts = shard_tokenized_prompts
             self.gt = shard_gt
             self.num_samples = len(shard_tokenized_prompts)
@@ -216,7 +219,7 @@ class Dataset:
     def get_dataset(self):
         if 'ruler' in self.dataset_name: # ruler/xxx
             task = self.dataset_name.split('/')[-1]
-            assert self.datalen in [8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024], "Only support datalen of 16k, 32k, 64k, 128k"
+            assert self.datalen in [2*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024], "Only support datalen of 16k, 32k, 64k, 128k"
 
             if 'llama-3' in self.tokenizer.name_or_path.lower():
                 model_dir = 'llama-3'
@@ -241,19 +244,39 @@ class Dataset:
             else:
                 self.num_samples = len(dataset)
             tokenized_prompts = []
+            tokenized_queries = []
             gt = []
 
-            for i in range(self.num_samples):
-                input_text = dataset[i]['input']
-                #input_ids = self.tokenizer.encode(input_text, return_tensors="pt", add_special_tokens=False)
-                input_ids = self.tokenizer(input_text, return_tensors="pt", add_special_tokens=False)
-                tokenized_prompts.append(input_ids)
-                gt.append(dataset[i]['outputs'])
+            if 'multiturn' in self.dataset_name:
+                for i in range(self.num_samples):
+                    input_text = dataset[i]['input']
+                    # Combine the first query with the input text and tokenize them jointly
+                    first_query = dataset[i]['queries'][0]
+                    combined_text = input_text + first_query
+                    input_ids = self.tokenizer(combined_text, return_tensors="pt", add_special_tokens=False)
+                    tokenized_prompts.append(input_ids)
+                    
+                    # Process remaining queries (if any)
+                    tokenized_query_list = []
+                    for query in dataset[i]['queries'][1:]:
+                        query_ids = self.tokenizer(query, return_tensors="pt", add_special_tokens=False)
+                        tokenized_query_list.append(query_ids)
+                    
+                    tokenized_queries.append(tokenized_query_list)
+                    gt.append(dataset[i]['answers'])
+                return tokenized_prompts, tokenized_queries, gt
+            else:
+                for i in range(self.num_samples):
+                    input_text = dataset[i]['input']
+                    input_ids = self.tokenizer(input_text, return_tensors="pt", add_special_tokens=False)
+                    tokenized_prompts.append(input_ids)
+                    gt.append(dataset[i]['outputs'])
 
-            return tokenized_prompts, gt
+                return tokenized_prompts, gt
+        
         elif 'long_bench' in self.dataset_name:
             task = self.dataset_name.split('/')[-1]
-            dataset = load_dataset('THUDM/LongBench', task, split='test')
+            dataset = load_dataset('THUDM/LongBench', task, split='test', trust_remote_code=True)
             
             if self.num_samples > 0:
                 self.num_samples = min(self.num_samples, len(dataset))
@@ -264,19 +287,23 @@ class Dataset:
             classes = []
 
             for i in range(len(dataset)):
-                if 'llama-3' in self.tokenizer.name_or_path.lower():
-                    #model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif 'yi' in self.tokenizer.name_or_path.lower():
-                    # model_template = Templates['lwm'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif 'glm' in self.tokenizer.name_or_path.lower():
-                    # model_template = Templates['glm'].format(ctx=LONG_BENCH_TEMPLATE[task])
-                    model_template = LONG_BENCH_TEMPLATE[task]
-                elif "deepseek" in self.tokenizer.name_or_path.lower():
-                    model_template = LONG_BENCH_TEMPLATE[task]
+                if self.use_chat_template:
+                    if 'llama-3' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'yi' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['yi'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'glm' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['glm'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'qwen' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['qwen'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif 'phi' in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['phi'].format(ctx=LONG_BENCH_TEMPLATE[task])
+                    elif "deepseek" in self.tokenizer.name_or_path.lower():
+                        model_template = Templates['deepseek'].format(task_template=LONG_BENCH_TEMPLATE[task])
+                    else:
+                        raise Exception("Model not found for chat template", self.tokenizer.name_or_path)
                 else:
-                    raise Exception("Model not found", self.tokenizer.name_or_path)
+                    model_template = LONG_BENCH_TEMPLATE[task]
 
                 input_text = model_template.format(**dataset[i])
                 # import pdb; pdb.set_trace()

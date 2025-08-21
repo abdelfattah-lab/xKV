@@ -28,6 +28,12 @@ TASKS = {
         'answer_prefix': """ The special magic {type_needle_v} for {query} mentioned in the provided text are"""
     },
     
+    'niah_multiturn': {
+        'tokens_to_generate': 128,
+        'template_context': """Some special magic {type_needle_v} are hidden within the following text. Make sure to memorize it. I will quiz you about the {type_needle_v} afterwards.\n{context}\n""",
+        'template_query': """What are all the special magic {type_needle_v} for {query} mentioned in the provided text? The special magic {type_needle_v} for {query} mentioned in the provided text are""",
+    },
+    
     'variable_tracking': {
         'tokens_to_generate': 30,
         'template': """Memorize and track the chain(s) of variable assignment hidden in the following text.\n\n{context}\nQuestion: Find all variables that are assigned the value {query} in the text above.""",

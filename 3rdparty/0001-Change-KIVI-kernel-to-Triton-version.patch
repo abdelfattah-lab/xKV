@@ -1,0 +1,80 @@
+From bdd5142c8673a68ade9df2873d39f786af49a475 Mon Sep 17 00:00:00 2001
+From: 410011max <410011max@gmail.com>
+Date: Tue, 29 Jul 2025 19:59:23 +0800
+Subject: [PATCH] Change KIVI kernel to Triton version
+
+---
+ minference/modules/forward.py |  5 +++--
+ minference/modules/kivi.py    | 10 +++++-----
+ 2 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/minference/modules/forward.py b/minference/modules/forward.py
+index 77944ff..00b220a 100644
+--- a/minference/modules/forward.py
++++ b/minference/modules/forward.py
+@@ -100,7 +100,8 @@ def attn_forward(
+             self.layer_idx,
+             cache_kwargs,
+         )
+-    if query_states.size(1) != key_states.size(1):
++
++    if not isinstance(key_states, tuple) and query_states.size(1) != key_states.size(1):
+         key_states = repeat_kv(key_states, query_states.size(1) // key_states.size(1))
+         value_states = repeat_kv(
+             value_states, query_states.size(1) // value_states.size(1)
+@@ -162,7 +163,7 @@ def attn_forward(
+                 query_states.transpose(1, 2),
+                 key_states.transpose(1, 2),
+                 value_states.transpose(1, 2),
+-                attention_mask,
++                None,
+                 q_len,
+                 position_ids=position_ids,
+                 dropout=dropout_rate,
+diff --git a/minference/modules/kivi.py b/minference/modules/kivi.py
+index 4ae5f2d..5197bdb 100644
+--- a/minference/modules/kivi.py
++++ b/minference/modules/kivi.py
+@@ -981,7 +981,7 @@ def kivi_forward(query_states, key_states, value_states, decoding_kwargs):
+ 
+     if key_states_quant_trans is not None:
+         if q_len == 1:
+-            att_qkquant = cuda_bmm_fA_qB_outer(
++            att_qkquant = triton_bmm_fA_qB_outer(
+                 group_size,
+                 query_states.to(torch.float16),
+                 key_states_quant_trans,
+@@ -989,10 +989,10 @@ def kivi_forward(query_states, key_states, value_states, decoding_kwargs):
+                 key_mn_trans,
+                 k_bits,
+             )
+-        else:  # cuda_bmm_fA_qB_outer will lead to nan when query_states.shape[-2] > 1, need a fix in the kernel side
++        else:  # triton_bmm_fA_qB_outer will lead to nan when query_states.shape[-2] > 1, need a fix in the kernel side
+             attn_qkquants_t = []
+             for i in range(q_len):
+-                att_qkquant_i = cuda_bmm_fA_qB_outer(
++                att_qkquant_i = triton_bmm_fA_qB_outer(
+                     group_size,
+                     query_states[:, :, i : i + 1, :].to(torch.float16),
+                     key_states_quant_trans,
+@@ -1035,7 +1035,7 @@ def kivi_forward(query_states, key_states, value_states, decoding_kwargs):
+     value_full_length = value_states_full.shape[-2]
+     if value_states_quant is not None:
+         if q_len == 1:
+-            attn_output = cuda_bmm_fA_qB_outer(
++            attn_output = triton_bmm_fA_qB_outer(
+                 group_size,
+                 attn_weights[:, :, :, :-value_full_length].to(torch.float16),
+                 value_states_quant,
+@@ -1050,7 +1050,7 @@ def kivi_forward(query_states, key_states, value_states, decoding_kwargs):
+             # if q_len > 1:
+             attn_outputs = []
+             for i in range(q_len):
+-                attn_output_i = cuda_bmm_fA_qB_outer(
++                attn_output_i = triton_bmm_fA_qB_outer(
+                     group_size,
+                     attn_weights[:, :, i : i + 1, :-value_full_length].to(
+                         torch.float16
+-- 
+2.34.1
+

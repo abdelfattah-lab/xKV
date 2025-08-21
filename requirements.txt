@@ -6,7 +6,7 @@ omegaconf==2.3.0
 torch==2.6.0
 huggingface-hub
 tqdm==4.66.3
-transformers==4.51.3
+transformers==4.51.0
 yacs==0.1.8
 accelerate==0.32.1
 protobuf==4.24.4

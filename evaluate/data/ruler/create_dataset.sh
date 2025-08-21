@@ -46,6 +46,8 @@ synthetic=(
     "niah_multikey_2"
     "niah_multivalue"
     "niah_multiquery"
+    "niah_multiturn_1"
+    "niah_multiturn_2"
     "vt"
     "fwe"
     "qa_1"

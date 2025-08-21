@@ -63,7 +63,64 @@ class Evaluator:
                 rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
                 for (pred, gt, classes) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
-                    scores.append(max([dataset.metric(pred, g, classes) for g in gt]))
+                    scores.append(max([dataset.metric(pred, g) for g in gt]))
+            elif 'niah_multiturn' in dataset.dataset_name:
+                # 1. Initial context (prefill and compress)
+                # NOTE(max410011): Use `generate` to get compressed KV-cache by calling `_prepare_cache_for_generation`
+                first_ret = llm.generate(
+                    **(prompt.to(llm.device)),
+                    return_dict_in_generate=True,
+                    max_new_tokens=dataset.gen_len,
+                    top_p=1.0, 
+                    temperature=0.0,
+                    do_sample=False,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+                context = first_ret.sequences
+                past_key_values = first_ret.past_key_values
+                
+                # Store the first response
+                first_generated_ids = first_ret.sequences[0, prompt.input_ids.shape[-1]:]
+                first_response = tokenizer.decode(first_generated_ids, skip_special_tokens=True)
+                rets = [[first_response]]
+                # 2. Multi-turn queries
+                for query in dataset.tokenized_queries[i]:
+                    generated = []
+                    cur_input = query["input_ids"].to(llm.device)
+                    # NOTE(max410011): Reduece gen_len to speed up, you may need longer gen_len for other tasks
+                    # for step in range(dataset.gen_len):
+                    for _ in range(10):
+                        with torch.no_grad():
+                            output = llm(
+                                input_ids=cur_input,
+                                past_key_values=past_key_values,
+                                return_dict=True,
+                            )
+
+                        next_token_logits = output.logits[:, -1, :]  # (B, vocab_size)
+                        next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)  # greedy decoding
+
+                        generated.append(next_token)
+                        past_key_values = output.past_key_values
+                    
+                        if next_token.item() == tokenizer.eos_token_id:
+                            break
+                        
+                        cur_input = next_token
+
+                    generated_ids = torch.cat(generated, dim=-1)  # (1, T)
+                    rets.append([tokenizer.decode(generated_ids[0], skip_special_tokens=True)])
+                
+                # Save the results
+                for (pred, gt) in zip(rets, dataset.gt[i]):
+                    if isinstance(gt, list):
+                        if len(gt) == 1:
+                            gt = gt[0]
+                    if isinstance(pred, list):
+                        if len(pred) == 1:
+                            pred = pred[0]
+                    scores.append(dataset.metric(pred, gt))
+                
             else:
                 #rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, num_logits_to_keep=1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)

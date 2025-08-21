@@ -40,17 +40,19 @@ cd xKV
 ```
 
 2. Prepare environment
+To run the code in this project, first, create a Python virtual environment using e.g. uv. To install uv, follow the [UV Installation Guide](https://docs.astral.sh/uv/getting-started/installation/).
 ```
-conda create -n xKV python=3.10
-conda activate xKV
-
-# cuda-toolkit (optional if your system doesn't have it)
-conda install -y nvidia/label/cuda-12.4.0::cuda-toolkit
-conda install -y nvidia::cuda-cudart-dev
-
-# install dependency
-pip install -r requirements.txt
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+uv venv --python 3.11 && source .venv/bin/activate && uv pip install --upgrade pip
+```
+Next, install dependency
+```
+git submodule update --init --recursive
+uv pip install -r requirements.txt
+uv pip install flash-attn==2.7.4.post1 --no-build-isolation
+uv pip install -e 3rdparty/fast-hadamard-transform --no-build-isolation
+uv pip install -e 3rdparty/MInference --no-build-isolation
+cd 3rdparty/MInference
+git am ../0001-Change-KIVI-kernel-to-Triton-version.patch
 ```
 
 3. Create Datasets (for RULER evaluation only)
@@ -77,6 +79,9 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy i
 
 > [!NOTE] 
 > When increasing the layer group size, you often need to adjust these ranks for a fair comparison. For instance, if you use `rank_k=128` for `layer_group_size=1`, then to compare performance under `layer_group_size=2`, set `rank_k=256` so that the average rank per layer is similar.
+
+> [!WARNING] 
+> When evaluting Qwen series, please pass `--flash2` to switch backend to FlashAttention 2. [ref](https://github.com/huggingface/transformers/issues/38002)
 ---
 
 ### Evaluation on RULER Benchmark
@@ -85,14 +90,14 @@ Below we provide the example commands for running the RULER benchmarks with diff
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 and 768 for each grouped keys and values.
 ```
 # xKV-4
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 512 --rank_v 768 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 256 --rank_v 384 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### Single SVD
 For evaluation of Single SVD under similar compression level, replacing the arguments `--layer_group_size 1` and `--rank_k 128 --rank_v_192`.
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/fwe,ruler/qa_1,ruler/qa_2" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 128 --rank_v 192 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 128 --rank_v 192 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### MiniCache
@@ -121,7 +126,7 @@ In our paper, we focus on compressing only the non-RoPE latents only.
 #### xKV for DeepSeek (compress only non-RoPE latents)
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 for grouped latents.
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 \
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 \
 evaluate/eval_acc.py \
 --datalen 65536 \
 --batch_size 1 \
@@ -129,8 +134,8 @@ evaluate/eval_acc.py \
 --model_name_or_path deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct \
 --xKV \
 --merge_k \
---rank_k 512 \
---layer_group_size 4 \
+--rank_k 64 \
+--layer_group_size 1 \
 --start_layer_idx 0 \
 --end_layer_idx -1 \
 --flash2

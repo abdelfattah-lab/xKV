@@ -79,6 +79,14 @@ class xKVConfig:
     merge_key: bool = True
     merge_value: bool = True
 
+    # Quantizer configuration
+    kv_bits: int = 16  # KV cache bit width, 16 means no quantization
+    group_size: int = 0  # 0 stands for per-token quant
+    sym: bool = False  # Symmetric or Asymmetric
+    clip_ratio: float = 1.0
+    hadamard: bool = True
+    
+
     # All groups
     layer_groups: List[LayerGroup] = field(default_factory=list)
 
@@ -202,6 +210,11 @@ class xKVConfig:
             "slerp_gamma": self.slerp_gamma,
             "merge_key": self.merge_key,
             "merge_value": self.merge_value,
+            "kv_bits": self.kv_bits,
+            "group_size": self.group_size,
+            "sym": self.sym,
+            "clip_ratio": self.clip_ratio,
+            "hadamard": self.hadamard,
         }
         d.update(self.extra_kwargs)
         return d
@@ -242,6 +255,9 @@ class xKVConfig:
         lines.append(f"  rank_k={self.rank_k!r}, rank_v={self.rank_v!r},")
         lines.append(f"  slerp_t={self.slerp_t!r}, slerp_gamma={self.slerp_gamma!r},")
         lines.append(f"  merge_key={self.merge_key}, merge_value={self.merge_value},")
+        lines.append(f"  # Quantizer params:")
+        lines.append(f"  kv_bits={self.kv_bits}, group_size={self.group_size},")
+        lines.append(f"  sym={self.sym}, clip_ratio={self.clip_ratio}, hadamard={self.hadamard},")
         lines.append(f"  # {len(self.layer_groups)} groups:")
         for idx, grp in enumerate(self.layer_groups):
             grp_repr = repr(grp).replace("\n", "\n    ")
@@ -255,11 +271,13 @@ def generate_consecutive_layer_groups(
     start_layer: int,
     end_layer: int,
     group_size: int,
+    stride: int = 1,
 ) -> List[LayerGroup]:
     """
     Chunk layers from [start_layer..end_layer] into consecutive groups
     of size 'group_size'. For example, if start=0, end=5, group_size=2,
-    you get groups [0,1], [2,3], [4,5].
+    stride=1, you get groups [0,1], [2,3], [4,5]. If start=3, end=15,
+    group_size=2, stride=4, you get groups [3,7], [11,15].
     
     By default, rank_k/rank_v/slerp_t/slerp_gamma are None here.
     They will be filled (or remain None) during xKVConfig.__post_init__.
@@ -267,8 +285,8 @@ def generate_consecutive_layer_groups(
     groups = []
     current = start_layer
     while current <= end_layer:
-        grp_end = min(current + group_size - 1, end_layer)
-        groups.append(LayerGroup(layers=list(range(current, grp_end + 1))))
+        grp_end = min(current + group_size * stride - 1, end_layer)
+        groups.append(LayerGroup(layers=list(range(current, grp_end + 1, stride))))
         current = grp_end + 1
     return groups
 
@@ -285,6 +303,12 @@ def generate_consecutive_xKV_config(
     slerp_gamma: float = 1.0,
     merge_key: bool = True,
     merge_value: bool = True,
+    # Quantization parameters
+    kv_bits: int = 16,
+    quantizer_group_size: int = 0,
+    sym: bool = False,
+    clip_ratio: float = 1.0,
+    hadamard: bool = True,
     extra_kwargs: dict = None,
 ) -> xKVConfig:
     """
@@ -298,6 +322,11 @@ def generate_consecutive_xKV_config(
       rank_k, rank_v: Global SVD defaults (if 'svd' method)
       slerp_t, slerp_gamma: Global SLERP defaults (if 'slerp' method)
       merge_key, merge_value: Whether to apply merges to key/value
+      kv_bits: KV cache bit width, 16 means no quantization
+      quantizer_group_size: Group size for quantization, 0 means per-token quantization
+      sym: Use symmetric quantization
+      clip_ratio: Clip ratio for quantization
+      hadamard: Use Hadamard transform for quantization
       extra_kwargs: Additional fields stored in the config
 
     Returns:
@@ -318,6 +347,12 @@ def generate_consecutive_xKV_config(
         slerp_gamma=slerp_gamma,
         merge_key=merge_key,
         merge_value=merge_value,
+        # Quantization parameters
+        kv_bits=kv_bits,
+        group_size=quantizer_group_size,
+        sym=sym,
+        clip_ratio=clip_ratio,
+        hadamard=hadamard,
         layer_groups=layer_groups,
         extra_kwargs=extra_kwargs or {}
     )

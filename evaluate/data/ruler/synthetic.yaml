@@ -92,6 +92,26 @@ niah_multiquery:
     num_needle_v: 1
     num_needle_q: 4
 
+niah_multiturn_1:
+  task: niah_multiturn
+  args:
+    type_haystack: essay
+    type_needle_k: words
+    type_needle_v: numbers
+    num_needle_k: 1
+    num_needle_v: 1
+    num_needle_q: 5
+
+niah_multiturn_2:
+  task: niah_multiturn
+  args:
+    type_haystack: needle
+    type_needle_k: words
+    type_needle_v: numbers
+    num_needle_k: 1
+    num_needle_v: 1
+    num_needle_q: 5
+
 vt:
   task: variable_tracking
   args:

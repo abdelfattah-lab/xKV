@@ -33,7 +33,7 @@ Mohamed S. Abdelfattah<sup>1</sup>
 We introduce xKV, a simple yet effective post-training compression method for KV-Cache, leveraging inter-layer redundancy. By applying singular value decomposition (SVD) across group of layers, xKV achieves up to 8× compression of the KV-Cache while maintaining strong accuracy.
 
 ## Environment Setup
-1. Clone the repository (Make sure you have Git, Conda installed on your system)
+1. Clone the repository (Make sure you have Git installed on your system)
 ```
 git clone https://github.com/abdelfattah-lab/xKV.git
 cd xKV

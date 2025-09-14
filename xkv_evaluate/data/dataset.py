@@ -21,7 +21,7 @@ import random
 import numpy as np
 from collections import Counter
 
-# RULER
+# RULER & LongBench
 from .metrics import (
     needle_score, 
     string_match_part, 
@@ -36,7 +36,7 @@ from .metrics import (
 # NIAH
 from .utils import generate_random_number, read_context_files, create_contexts, NIAH_TEMPLATE, RANDOM_NEEDLE_CITIES, LONG_BENCH_TEMPLATE
 
-#### LONG_BENCH ####
+# LONG_BENCH
 
 def f1_score_longbench(prediction, ground_truth):
     common = Counter(prediction) & Counter(ground_truth)
@@ -55,7 +55,6 @@ def qa_f1_score_longbench(prediction, ground_truth):
     prediction_tokens = normalized_prediction.split()
     ground_truth_tokens = normalized_ground_truth.split()
     return f1_score_longbench(prediction_tokens, ground_truth_tokens)
-
 
 
 METRICS_FN = {
@@ -127,15 +126,15 @@ Templates = {
     "deepseek": "<｜begin▁of▁sentence｜>User: {task_template}\n\nAssistant:",
 }
 
+
 class Dataset:
-    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False):
+    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.datalen = datalen
         self.num_samples = num_samples
         self.rank = rank
         self.world_size = world_size
-        self.use_chat_template = use_chat_template
         self.is_sharded = False
 
         if dataset_name == 'niah':
@@ -219,7 +218,7 @@ class Dataset:
     def get_dataset(self):
         if 'ruler' in self.dataset_name: # ruler/xxx
             task = self.dataset_name.split('/')[-1]
-            assert self.datalen in [2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024], "Only support datalen of 16k, 32k, 64k, 128k"
+            assert self.datalen in [2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024], "Only support datalen of 2k, 4k, 8k, 16k, 32k, 64k, 128k"
 
             if 'llama-3' in self.tokenizer.name_or_path.lower():
                 model_dir = 'llama-3'
@@ -273,11 +272,12 @@ class Dataset:
                     gt.append(dataset[i]['outputs'])
 
                 return tokenized_prompts, gt
-        
+
         elif 'long_bench' in self.dataset_name:
             task = self.dataset_name.split('/')[-1]
             dataset = load_dataset('THUDM/LongBench', task, split='test', trust_remote_code=True)
-            
+            use_chat_template = task not in ["lcc", "repobench-p", "samsum", "trec", "triviaqa"]
+
             if self.num_samples > 0:
                 self.num_samples = min(self.num_samples, len(dataset))
             else:
@@ -287,7 +287,7 @@ class Dataset:
             classes = []
 
             for i in range(len(dataset)):
-                if self.use_chat_template:
+                if use_chat_template:
                     if 'llama-3' in self.tokenizer.name_or_path.lower():
                         model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
                     elif 'yi' in self.tokenizer.name_or_path.lower():
@@ -316,5 +316,6 @@ class Dataset:
                 gt.append(dataset[i]['answers'])
                 classes.append(dataset[i]['all_classes'])
             return tokenized_prompts, gt, classes
+
         else:
             raise ValueError(f"Dataset {self.dataset_name} not found, please choose in ruler, persona, infini_bench, needle, niah, long_bench")

@@ -16,46 +16,21 @@
 ################################################################################
 
 from datasets import load_dataset
-from termcolor import colored
-import random
-import numpy as np
-from collections import Counter
 
 # RULER & LongBench
 from .metrics import (
-    needle_score, 
-    string_match_part, 
+    needle_score,
+    string_match_part,
     multi_number, 
-    multi_words, 
-    normalize_answer, 
+    multi_words,
     rouge_score,
     retrieval_score,
     code_sim_score,
+    qa_f1_score,
+    count_score,
 )
 
-# NIAH
-from .utils import generate_random_number, read_context_files, create_contexts, NIAH_TEMPLATE, RANDOM_NEEDLE_CITIES, LONG_BENCH_TEMPLATE
-
-# LONG_BENCH
-
-def f1_score_longbench(prediction, ground_truth):
-    common = Counter(prediction) & Counter(ground_truth)
-    num_same = sum(common.values())
-    if num_same == 0:
-        return 0
-    precision = 1.0 * num_same / len(prediction)
-    recall = 1.0 * num_same / len(ground_truth)
-    f1 = (2 * precision * recall) / (precision + recall)
-    return f1
-
-def qa_f1_score_longbench(prediction, ground_truth):
-    normalized_prediction = normalize_answer(prediction)
-    normalized_ground_truth = normalize_answer(ground_truth)
-
-    prediction_tokens = normalized_prediction.split()
-    ground_truth_tokens = normalized_ground_truth.split()
-    return f1_score_longbench(prediction_tokens, ground_truth_tokens)
-
+from .utils import LONG_BENCH_TEMPLATE
 
 METRICS_FN = {
     'niah': needle_score,
@@ -65,18 +40,26 @@ METRICS_FN = {
     'fwe': multi_words,
     'qa': string_match_part,
     
-    "long_bench/narrativeqa": qa_f1_score_longbench,
-    "long_bench/qasper": qa_f1_score_longbench,
-    "long_bench/multifieldqa_en": qa_f1_score_longbench,
-    "long_bench/hotpotqa": qa_f1_score_longbench,
-    "long_bench/2wikimqa": qa_f1_score_longbench,
-    "long_bench/musique": qa_f1_score_longbench,
+    # Single-Document QA
+    "long_bench/narrativeqa": qa_f1_score,
+    "long_bench/qasper": qa_f1_score,
+    "long_bench/multifieldqa_en": qa_f1_score,
+    # Multi-Document QA
+    "long_bench/hotpotqa": qa_f1_score,
+    "long_bench/2wikimqa": qa_f1_score,
+    "long_bench/musique": qa_f1_score,
+    # Summarization
     "long_bench/gov_report": rouge_score,
     "long_bench/qmsum": rouge_score,
     "long_bench/multi_news": rouge_score,
-    "long_bench/triviaqa": qa_f1_score_longbench,
+    # Few-shot Learning
+    # "long_bench/trec": classification_score,
+    "long_bench/triviaqa": qa_f1_score,
     "long_bench/samsum": rouge_score,
+    # Synthetic Task
+    # "long_bench/passage_count": count_score,
     "long_bench/passage_retrieval_en": retrieval_score,
+    # Code Completion
     "long_bench/lcc": code_sim_score,
     "long_bench/repobench-p": code_sim_score,
 }

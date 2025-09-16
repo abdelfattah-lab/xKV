@@ -141,7 +141,7 @@ if __name__ == '__main__':
         },
         'kivi': {
             'kv_type': 'kivi',
-            'attn_kwargs': {"bits": 2, "group_size": 128, "residual_length": 128}
+            'attn_kwargs': {"bits": 2, "group_size": args.gs, "residual_length": 128}
         },
         'quest': {
             'kv_type': 'quest',

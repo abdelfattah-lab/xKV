@@ -44,7 +44,6 @@ def normalize_answer(s):
 
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
-
 def normalize_zh_answer(s):
     """Lower text and remove punctuation, extra whitespace."""
 
@@ -111,7 +110,6 @@ def needle_score(prediction, ground_truth):
     score = max(float(ground_truth in pred_list), score)
     return score
 
-
 def count_score(prediction, ground_truth):
     numbers = re.findall(r"\d+", prediction)
     right_num = 0
@@ -154,7 +152,6 @@ def code_sim_score(prediction, ground_truth):
             break
     return (fuzz.ratio(prediction, ground_truth) / 100)
 
-    
 def rouge_score(prediction, ground_truth):
     rouge = Rouge()
     try:
@@ -186,7 +183,6 @@ def qa_f1_score(prediction, ground_truth):
     prediction_tokens = normalized_prediction.split()
     ground_truth_tokens = normalized_ground_truth.split()
     return f1_score(prediction_tokens, ground_truth_tokens)
-
 
 def qa_f1_zh_score(prediction, ground_truth):
     prediction_tokens = list(jieba.cut(prediction, cut_all=False))

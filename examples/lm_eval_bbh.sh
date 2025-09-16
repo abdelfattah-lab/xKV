@@ -10,21 +10,21 @@ CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --tasks bbh --limit 50 \
     | tee -a logs/lm_eval/bbh_baseline.log
 
-# xKV-1 (Layer group size 1)
+# xKV-1
 CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
     --tasks bbh --limit 50 \
     --xKV --merge_k --merge_v --rank_k 96 --rank_v 144 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1 \
     | tee -a logs/lm_eval/bbh_xKV-1_k96_v144.log
 
-# xKV-2 (Layer group size 2)
+# xKV-2
 CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
     --tasks bbh --limit 50 \
     --xKV --merge_k --merge_v --rank_k 192 --rank_v 288 --layer_group_size 2 --start_layer_idx 0 --end_layer_idx -1 \
     | tee -a logs/lm_eval/bbh_xKV-2_k192_v288.log
 
-# xKV-4 (Layer group size 4)
+# xKV-4
 CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
     --tasks bbh --limit 50 \
@@ -44,6 +44,21 @@ CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --tasks bbh --limit 50 \
     --xKV --merge_k --merge_v --rank_k 512 --rank_v 768 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1 \
     | tee -a logs/lm_eval/bbh_xKV-4_k512_v768.log
+
+# xKV-2  7x Comp. rate
+CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
+    --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --tasks bbh --limit 50 \
+    --xKV --merge_k --merge_v --rank_k 224 --rank_v 336 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1 \
+    | tee -a logs/lm_eval/bbh_xKV-2_k224_v336.log
+
+# xKV-4  7x Comp. rate
+CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
+    --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --tasks bbh --limit 50 \
+    --xKV --merge_k --merge_v --rank_k 448 --rank_v 672 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1 \
+    | tee -a logs/lm_eval/bbh_xKV-4_k448_v672.log
+
 
 # =============================================================================
 # Baseline Methods Comparison  

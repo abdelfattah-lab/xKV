@@ -3,6 +3,15 @@
 # =============================================================================
 # LM-Eval Evaluations for GSM8K 
 # =============================================================================
+gsm8k
+gsm8k_platinum
+gsm8k_cot
+gsm8k_platinum_cot
+
+bbh -> bbh_cot_fewshot
+
+--apply_chat_template
+# --metadata '{"max_seq_lengths":[4096,8192,16384,32768]}
 
 # Baseline (Full Attention)
 CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
@@ -83,7 +92,7 @@ CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
     --tasks gsm8k \
     --kivi \
-    | tee -a logs/lm_eval/gsm8k_kivi_64.log
+    | tee -a logs/lm_eval/gsm8k_kivi_128.log
 
 # Quest
 CUDA_VISIBLE_DEVICES=0 python test_lm_eval/eval_with_lm_eval.py \

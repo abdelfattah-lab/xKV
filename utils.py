@@ -107,8 +107,8 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument('--snapKV', action='store_true', help='whether to enable snapKV patch')
     parser.add_argument('--pyramidkv', action='store_true', help='whether to enable pyramidkv patch')
     parser.add_argument('--kivi', action='store_true', help='whether to enable KIVI patch')
+    parser.add_argument('--gs', type=int, default=64, help='group size for KIVI')
     parser.add_argument('--quest', action='store_true', help='whether to enable Quest patch')
-
 
     # online svd options
     # SVD-related parameters
@@ -146,7 +146,10 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument("--start_layer_idx", type=int, default=0, help="The starting layer index for layer merging")
     parser.add_argument("--end_layer_idx", type=int, default=-1, help="The ending layer index for layer merging. If -1, it will be the last layer.")
     parser.add_argument('--customized_merge_config', type=str, help='custom config file')
-    
+
+    # Sparse methods (streamingllm/snapkv/pyramidkv/quest)
+    parser.add_argument('--budget', type=int, default=2048, help='budget for token selection/eviction method (streamingllm/snapkv/pyramidkv/quest)')
+
     # Quantization parameters
     parser.add_argument('--kv_bits', type=int, default=16, help='KV cache bit width, 16 means no quantization')
     parser.add_argument('--group_size', type=int, default=0, help='Group size for quantization, 0 means per-token quantization')

@@ -3,6 +3,7 @@
 # =============================================================================
 
 # Compression Rate ~2x
+# Single SVD
 CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 xkv_evaluate/eval_acc.py \
     --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/triviaqa,long_bench/samsum,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --batch_size 1 \
@@ -30,7 +31,7 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1
 # Compression Rate ~8x
 # Single SVD
 CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 xkv_evaluate/eval_acc.py \
-    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/trec,long_bench/triviaqa,long_bench/samsum,long_bench/passage_count,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
+    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/triviaqa,long_bench/samsum,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --batch_size 1 \
     --xKV --merge_k --merge_v --rank_k 96 --rank_v 144 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1 \
     --flash2 \
@@ -38,7 +39,7 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1
 
 # xKV-2
 CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 xkv_evaluate/eval_acc.py \
-    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/trec,long_bench/triviaqa,long_bench/samsum,long_bench/passage_count,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
+    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/triviaqa,long_bench/samsum,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --batch_size 1 \
     --xKV --merge_k --merge_v --rank_k 192 --rank_v 288 --layer_group_size 2 --start_layer_idx 0 --end_layer_idx -1 \
     --flash2 \
@@ -46,7 +47,7 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1
 
 # xKV-4
 CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 xkv_evaluate/eval_acc.py \
-    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/trec,long_bench/triviaqa,long_bench/samsum,long_bench/passage_count,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
+    --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/triviaqa,long_bench/samsum,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --batch_size 1 \
     --xKV --merge_k --merge_v --rank_k 384 --rank_v 576 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1 \
     --flash2 \
@@ -135,7 +136,7 @@ CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1
     --flash2 --kivi --gs 128 \
     | tee -a logs/longbench/kivi-gs128.log
 
-# Quest
+# Quest-1k
 CUDA_VISIBLE_DEVICES=2,3,4,5 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 xkv_evaluate/eval_acc.py \
     --dataset_name "long_bench/narrativeqa,long_bench/qasper,long_bench/multifieldqa_en,long_bench/hotpotqa,long_bench/2wikimqa,long_bench/musique,long_bench/gov_report,long_bench/qmsum,long_bench/multi_news,long_bench/triviaqa,long_bench/samsum,long_bench/passage_retrieval_en,long_bench/lcc,long_bench/repobench-p" \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --batch_size 1 \

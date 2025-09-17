@@ -28,6 +28,7 @@ from .metrics import (
     code_sim_score,
     qa_f1_score,
     count_score,
+    classification_score,
 )
 
 from .utils import LONG_BENCH_TEMPLATE
@@ -53,11 +54,11 @@ METRICS_FN = {
     "long_bench/qmsum": rouge_score,
     "long_bench/multi_news": rouge_score,
     # Few-shot Learning
-    # "long_bench/trec": classification_score,
+    "long_bench/trec": classification_score,
     "long_bench/triviaqa": qa_f1_score,
     "long_bench/samsum": rouge_score,
     # Synthetic Task
-    # "long_bench/passage_count": count_score,
+    "long_bench/passage_count": count_score,
     "long_bench/passage_retrieval_en": retrieval_score,
     # Code Completion
     "long_bench/lcc": code_sim_score,

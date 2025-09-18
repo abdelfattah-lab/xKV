@@ -22,11 +22,57 @@ from typing import Callable, Dict, List, Tuple
 # Common experiment ordering
 EXPERIMENT_ORDER = ['full', 'MiniCache', 'xKV', 'StreamingLLM', 'SnapKV', 'PyramidKV', 'KIVI', 'Quest']
 BUDGETED_METHODS = ['StreamingLLM', 'SnapKV', 'PyramidKV']
-# LongBench dataset identifiers (for autodetection)
-LONG_BENCH_KEYS = [
-    'narrativeqa', 'qasper', 'multifieldqa_en', 'hotpotqa', '2wikimqa', 'musique',
-    'gov_report', 'qmsum', 'multi_news', 'triviaqa', 'samsum', 'passage_retrieval_en', 'lcc', 'repobench-p'
+
+# RULER
+RULER_DATASET_ORDER: List[str] = [
+    'niah_single_1', 'niah_single_2', 'niah_single_3',
+    'niah_multikey_1', 'niah_multikey_2', 'niah_multiquery', 'niah_multivalue',
+    'qa_1', 'qa_2', 'vt', 'fwe',
 ]
+RULER_DATASET_NAMES: Dict[str, str] = {
+    'niah_single_1': 'N-S1', 'niah_single_2': 'N-S2', 'niah_single_3': 'N-S3',
+    'niah_multikey_1': 'N-MK1', 'niah_multikey_2': 'N-MK2', 'niah_multiquery': 'N-MQ',
+    'niah_multivalue': 'N-MV', 'qa_1': 'QA-1', 'qa_2': 'QA-2', 'vt': 'VT', 'fwe': 'FWE',
+}
+
+# LongBench
+LONGBENCH_DATASET_ORDER: List[str] = [
+    'narrativeqa', 'qasper', 'multifieldqa_en', 'hotpotqa', '2wikimqa', 'musique',
+    'gov_report', 'qmsum', 'multi_news', 'trec', 'triviaqa', 'samsum',
+    'passage_count', 'passage_retrieval_en', 'lcc', 'repobench-p',
+]
+LONGBENCH_DATASET_NAMES: Dict[str, str] = {
+    'narrativeqa': 'NarrativeQA', 'qasper': 'Qasper', 'multifieldqa_en': 'MultifieldQA',
+    'hotpotqa': 'HotpotQA', '2wikimqa': '2WikiMQA', 'musique': 'Musique',
+    'gov_report': 'Gov Report', 'qmsum': 'QMSum', 'multi_news': 'MultiNews',
+    'trec': 'TREC', 'triviaqa': 'TriviaQA', 'samsum': 'Samsum',
+    'passage_count': 'PassageCount', 'passage_retrieval_en': 'PassageRetrieval',
+    'lcc': 'LCC', 'repobench-p': 'RepoBench',
+}
+
+def find_dataset_key_by_substring(name: str, keys: List[str]) -> str | None:
+    lower = name.lower()
+    for key in keys:
+        if key in lower:
+            return key
+    return None
+
+def format_dataset(name: str, order: List[str], names: Dict[str, str]) -> str:
+    key = find_dataset_key_by_substring(name, order)
+    if key is None:
+        return name
+    return names.get(key, key)
+
+def dataset_sort_key(name: str, order: List[str]) -> int:
+    key = find_dataset_key_by_substring(name, order)
+    if key is None:
+        return 999
+    try:
+        return order.index(key)
+    except ValueError:
+        return 999
+
+
 def extract_tables(log_file: str) -> List[str]:
     with open(log_file, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -118,71 +164,28 @@ def get_experiment_sort_key(experiment: str) -> int:
 
 # Benchmark-specific config
 
-def build_config(benchmark: str) -> Tuple[List[str], Dict[str, str], Callable[[str], str], Callable[[str], int], str, str]:
+def build_config(benchmark: str) -> Tuple[List[str], Dict[str, str], str, str]:
     bench = benchmark.lower()
     if bench == 'ruler':
-        dataset_order = ['niah_single_1', 'niah_single_2', 'niah_single_3', 'niah_multikey_1', 'niah_multikey_2', 'niah_multiquery', 'niah_multivalue', 'qa_1', 'qa_2', 'vt', 'fwe']
-        dataset_names = {
-            'niah_single_1': 'N-S1', 'niah_single_2': 'N-S2', 'niah_single_3': 'N-S3',
-            'niah_multikey_1': 'N-MK1', 'niah_multikey_2': 'N-MK2', 'niah_multiquery': 'N-MQ',
-            'niah_multivalue': 'N-MV', 'qa_1': 'QA-1', 'qa_2': 'QA-2', 'vt': 'VT', 'fwe': 'FWE',
-        }
-
-        def format_dataset(name: str) -> str:
-            if 'ruler/' in name:
-                dataset_key = name.split('ruler/')[-1]
-                return dataset_names.get(dataset_key, dataset_key)
-            return name
-
-        def dataset_sort_key(dataset: str) -> int:
-            if 'ruler/' in dataset:
-                key = dataset.split('ruler/')[-1]
-                for i, k in enumerate(dataset_order):
-                    if k == key:
-                        return i
-            return 999
+        dataset_order = RULER_DATASET_ORDER
+        dataset_names = RULER_DATASET_NAMES
 
         title = 'RULER Results Table (%)'
         csv_name = 'ruler_results.csv'
-        return dataset_order, dataset_names, format_dataset, dataset_sort_key, title, csv_name
-
+        return dataset_order, dataset_names, title, csv_name
     elif bench == 'longbench':
-        dataset_order = [
-            'narrativeqa', 'qasper', 'multifieldqa_en', 'hotpotqa', '2wikimqa', 'musique',
-            'gov_report', 'qmsum', 'multi_news', 'triviaqa', 'samsum', 'passage_retrieval_en', 'lcc', 'repobench-p',
-        ]
-        dataset_names = {
-            'narrativeqa': 'NarrativeQA', 'qasper': 'Qasper', 'multifieldqa_en': 'MultifieldQA',
-            'hotpotqa': 'HotpotQA', '2wikimqa': '2WikiMQA', 'musique': 'Musique',
-            'gov_report': 'Gov Report', 'qmsum': 'QMSum', 'multi_news': 'MultiNews',
-            'triviaqa': 'TriviaQA', 'samsum': 'Samsum', 'passage_retrieval_en': 'PassageRetrieval',
-            'lcc': 'LCC', 'repobench-p': 'RepoBench',
-        }
-
-        def format_dataset(name: str) -> str:
-            lower = name.lower()
-            for key, disp in dataset_names.items():
-                if key in lower:
-                    return disp
-            return name
-
-        def dataset_sort_key(dataset: str) -> int:
-            lower = dataset.lower()
-            for i, key in enumerate(dataset_order):
-                if key in lower:
-                    return i
-            return 999
+        dataset_order = LONGBENCH_DATASET_ORDER
+        dataset_names = LONGBENCH_DATASET_NAMES
 
         title = 'LongBench Results Table (%)'
         csv_name = 'longbench_results.csv'
-        return dataset_order, dataset_names, format_dataset, dataset_sort_key, title, csv_name
-
+        return dataset_order, dataset_names, title, csv_name
     else:
         raise ValueError("benchmark must be 'ruler' or 'longbench'")
 
 
 def build_and_save_table(bench: str, frames: List[pd.DataFrame]):
-    dataset_order, dataset_names, format_dataset, dataset_sort_key, title, csv_name = build_config(bench)
+    dataset_order, dataset_names, title, csv_name = build_config(bench)
 
     combined = pd.concat(frames, ignore_index=True)
     combined['baseline'] = pd.to_numeric(combined['baseline'], errors='coerce')
@@ -310,7 +313,9 @@ def main():
 
                 datasets = [str(x) for x in df['dataset'].tolist()]
                 is_ruler = any('ruler/' in s for s in datasets)
-                is_longbench = any(any(k in s.lower() for k in LONG_BENCH_KEYS) for s in datasets) if not is_ruler else False
+                # Derive LongBench keys from config to avoid duplication
+                lb_keys, _, _, _ = build_config('longbench')
+                is_longbench = any(any(k in s.lower() for k in lb_keys) for s in datasets) if not is_ruler else False
 
                 bench = None
                 if is_ruler:
@@ -320,12 +325,12 @@ def main():
                 else:
                     continue
 
-                _, _, format_dataset, dataset_sort_key, _, _ = build_config(bench)
+                dataset_order, dataset_names, _, _ = build_config(bench)
 
                 # Experiment label is the raw filename stem (before .log)
                 df['experiment'] = os.path.splitext(os.path.basename(log_file))[0]
-                df['dataset_formatted'] = df['dataset'].apply(format_dataset)
-                df['sort_key'] = df['dataset'].apply(dataset_sort_key)
+                df['dataset_formatted'] = df['dataset'].apply(lambda n: format_dataset(n, dataset_order, dataset_names))
+                df['sort_key'] = df['dataset'].apply(lambda n: dataset_sort_key(n, dataset_order))
                 df['experiment_sort_key'] = df['experiment'].apply(get_experiment_sort_key)
                 df['source_file'] = log_file
                 combined_by_bench[bench].append(df)

@@ -295,10 +295,11 @@ class Dataset:
                 # input_ids = truncate_by_tokens(input_text, self.tokenizer, self.datalen)
                 input_ids = self.tokenizer(input_text, return_tensors="pt")
 
-                #if input_ids.shape[-1] <= self.datalen and input_ids.shape[-1] > 4096:
-                tokenized_prompts.append(input_ids)
-                gt.append(dataset[i]['answers'])
-                classes.append(dataset[i]['all_classes'])
+                if input_ids.shape[-1] <= self.datalen and input_ids.shape[-1] > 4096:
+                    tokenized_prompts.append(input_ids)
+                    gt.append(dataset[i]['answers'])
+                    classes.append(dataset[i]['all_classes'])
+
             return tokenized_prompts, gt, classes
 
         else:

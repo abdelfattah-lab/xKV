@@ -59,7 +59,7 @@ git am ../0001-Change-KIVI-kernel-to-Triton-version.patch
 3. Create Datasets (for RULER evaluation only)
 ```
 python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
-cd evaluate/data/ruler
+cd xkv_evaluate/data/ruler
 bash create_dataset.sh "meta-llama/Meta-Llama-3.1-8B-Instruct" "llama-3"
 ```
 

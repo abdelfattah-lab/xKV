@@ -17,7 +17,7 @@ import os
 import glob
 import argparse
 import pandas as pd
-from typing import Callable, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 # Common experiment ordering
 EXPERIMENT_ORDER = ['full', 'MiniCache', 'xKV', 'StreamingLLM', 'SnapKV', 'PyramidKV', 'KIVI', 'Quest']
@@ -171,21 +171,25 @@ def build_config(benchmark: str) -> Tuple[List[str], Dict[str, str], str, str]:
         dataset_names = RULER_DATASET_NAMES
 
         title = 'RULER Results Table (%)'
-        csv_name = 'ruler_results.csv'
-        return dataset_order, dataset_names, title, csv_name
+        return dataset_order, dataset_names, title
     elif bench == 'longbench':
         dataset_order = LONGBENCH_DATASET_ORDER
         dataset_names = LONGBENCH_DATASET_NAMES
 
         title = 'LongBench Results Table (%)'
-        csv_name = 'longbench_results.csv'
-        return dataset_order, dataset_names, title, csv_name
+        return dataset_order, dataset_names, title
     else:
         raise ValueError("benchmark must be 'ruler' or 'longbench'")
 
 
 def build_and_save_table(bench: str, frames: List[pd.DataFrame]):
-    dataset_order, dataset_names, title, csv_name = build_config(bench)
+    dataset_order, dataset_names, title = build_config(bench)
+    if frames and 'source_file' in frames[0].columns:
+        first_log = frames[0]['source_file'].iloc[0]
+        log_dir = os.path.dirname(first_log)
+        csv_name = os.path.basename(log_dir) + '.csv'
+    else:
+        csv_name = 'results.csv'
 
     combined = pd.concat(frames, ignore_index=True)
     combined['baseline'] = pd.to_numeric(combined['baseline'], errors='coerce')
@@ -314,7 +318,7 @@ def main():
                 datasets = [str(x) for x in df['dataset'].tolist()]
                 is_ruler = any('ruler/' in s for s in datasets)
                 # Derive LongBench keys from config to avoid duplication
-                lb_keys, _, _, _ = build_config('longbench')
+                lb_keys, _, _ = build_config('longbench')
                 is_longbench = any(any(k in s.lower() for k in lb_keys) for s in datasets) if not is_ruler else False
 
                 bench = None
@@ -325,7 +329,7 @@ def main():
                 else:
                     continue
 
-                dataset_order, dataset_names, _, _ = build_config(bench)
+                dataset_order, dataset_names, _ = build_config(bench)
 
                 # Experiment label is the raw filename stem (before .log)
                 df['experiment'] = os.path.splitext(os.path.basename(log_file))[0]

@@ -293,10 +293,10 @@ class Dataset:
                 # import pdb; pdb.set_trace()
                 #breakpoint()
                 # input_ids = truncate_by_tokens(input_text, self.tokenizer, self.datalen)
-                input_ids = self.tokenizer(input_text, return_tensors="pt")
+                encodings = self.tokenizer(input_text, return_tensors="pt")
 
-                if input_ids.shape[-1] <= self.datalen and input_ids.shape[-1] > 4096:
-                    tokenized_prompts.append(input_ids)
+                if encodings.input_ids.shape[-1] <= self.datalen and encodings.input_ids.shape[-1] > 4096:
+                    tokenized_prompts.append(encodings)
                     gt.append(dataset[i]['answers'])
                     classes.append(dataset[i]['all_classes'])
 

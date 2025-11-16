@@ -50,7 +50,8 @@ Templates = {
     'qwen': "<|im_start|>system\nYou are a helpful assistant<|im_end|>\n<|im_start|>user\n{task_template}<|im_end|>\n<|im_start|>assistant\n",
     'phi': "<|system|>\nYou are a helpful assistant<|end|>\n<|user|>\n{task_template}<|end|>\n<|assistant|>\n",
     "deepseek": "<｜begin▁of▁sentence｜>User: {task_template}\n\nAssistant:",
-    'llama-4': "<|begin_of_text|><|header_start|>user<|header_end|>\n\n{task_template}<|eot|><|header_start|>assistant<|header_end|>"
+    'llama-4': "<|begin_of_text|><|header_start|>user<|header_end|>\n\n{task_template}<|eot|><|header_start|>assistant<|header_end|>",
+    'gpt-oss': "<|start|>system<|message|>You are a helpful assistant.<|start|>user<|message|>{task_template}<|start|>assistant<|channel|>final<|message|>"
 }
 
 parser = argparse.ArgumentParser()

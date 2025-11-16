@@ -218,6 +218,8 @@ class Dataset:
                 model_dir = 'phi'
             elif 'deepseek' in self.tokenizer.name_or_path.lower():
                 model_dir = 'deepseek'
+            elif 'gpt-oss' in self.tokenizer.name_or_path.lower():
+                model_dir = 'gpt-oss'
             else:
                 raise Exception("Model not found", self.tokenizer.name_or_path)
 

@@ -109,6 +109,7 @@ def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument('--kivi', action='store_true', help='whether to enable KIVI patch')
     parser.add_argument('--gs', type=int, default=64, help='group size for KIVI')
     parser.add_argument('--quest', action='store_true', help='whether to enable Quest patch')
+    parser.add_argument('--kvzip', action='store_true', help='whether to enable KVZip patch')
 
     # online svd options
     # SVD-related parameters

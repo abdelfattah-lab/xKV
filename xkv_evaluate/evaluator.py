@@ -35,7 +35,7 @@ class Evaluator:
         # init final report
         self.all_stats = []
 
-    def test(self, llm, tokenizer, dataset: Dataset, output_path: str, setting: str = 'baseline'):
+    def test(self, llm, tokenizer, dataset: Dataset, output_path: str, setting: str = 'baseline', use_kvzip: bool = False):
 
         # mkdir if not exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -58,7 +58,64 @@ class Evaluator:
         for i in range(dataset.num_samples):
             #prompt = torch.cat([dataset.tokenized_prompts[i*bsz+j] for j in range(bsz)], dim=0)
             prompt = dataset.tokenized_prompts[i]
-            if 'long_bench' in dataset.dataset_name:
+            
+            # KVZip requires special handling with explicit prefill and prune steps
+            if use_kvzip:
+                # KVZip uses its own ModelKVzip wrapper that handles:
+                # 1. Prefill: encode context and perform chunked prefilling
+                # 2. Scoring: compute KV importance scores via context reconstruction
+                # 3. Prune: compress KV cache based on importance scores
+                # 4. Generate: generate response using compressed KV cache
+                
+                # Step 1: Prefill context with importance scoring (using default parameters)
+                # KVZip expects input_ids tensor, extract from BatchEncoding if needed
+                if hasattr(prompt, 'input_ids'):
+                    prompt_ids = prompt.input_ids
+                elif isinstance(prompt, dict) and 'input_ids' in prompt:
+                    prompt_ids = prompt['input_ids']
+                else:
+                    prompt_ids = prompt
+                
+                # Move to same device as model
+                prompt_ids = prompt_ids.to(llm.model.device)
+                kv_cache = llm.prefill(prompt_ids, load_score=False)  # prefill KV cache + importance scoring
+                
+                # Step 2: Prune KV cache (using default compression ratio of 0.125)
+                kv_cache.prune(ratio=0.125)
+                
+                # Step 3: Generate response using compressed KV cache
+                if 'long_bench' in dataset.dataset_name:
+                    query_template = llm.apply_template("")  # Empty query to get template tokens
+                    output_text = llm.generate(
+                        query=query_template,
+                        kv=kv_cache,
+                        update_cache=False
+                    )
+                    rets = [output_text]
+                    
+                    for (pred, gt, all_classes) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
+                        scores.append(max([dataset.metric(pred, g, all_classes=all_classes) for g in gt]))
+                        
+                elif 'niah_multiturn' in dataset.dataset_name:
+                    raise NotImplementedError("Multi-turn evaluation not yet implemented for KVZip")
+                    
+                else:
+                    # For RULER and other tasks
+                    query_template = llm.apply_template("")
+                    output_text = llm.generate(
+                        query=query_template,
+                        kv=kv_cache,
+                        update_cache=False
+                    )
+                    rets = [output_text]
+                    
+                    for (pred, gt) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
+                        if isinstance(gt, list):
+                            if len(gt) == 1:
+                                gt = gt[0]
+                        scores.append(dataset.metric(pred, gt))
+                        
+            elif 'long_bench' in dataset.dataset_name:
                 #rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, num_logits_to_keep=1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]

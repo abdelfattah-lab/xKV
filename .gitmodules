@@ -7,3 +7,6 @@
 [submodule "3rdparty/lm-evaluation-harness"]
 	path = 3rdparty/lm-evaluation-harness
 	url = https://github.com/EleutherAI/lm-evaluation-harness.git
+[submodule "3rdparty/KVzip"]
+	path = 3rdparty/KVzip
+	url = git@github.com:snu-mllab/KVzip.git

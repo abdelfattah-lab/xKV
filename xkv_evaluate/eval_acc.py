@@ -182,6 +182,32 @@ if __name__ == '__main__':
                 print(colored(f"{method.upper()} applied successfully", "green"))
             break
     
+    # Apply KVZip if specified
+    # KVZip uses a different architecture with explicit prefill/prune/generate steps
+    # It requires using ModelKVzip wrapper instead of standard transformers model
+    use_kvzip = False
+    if args.kvzip:
+        from kvzip.model.wrapper import ModelKVzip
+
+        # Save original model name before replacing
+        original_model_name = model_name
+        
+        # Clean up the standard transformers model to free memory
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        # Initialize KVZip model wrapper
+        # This loads the model internally and wraps it with KVZip functionality
+        # Using kv_type="retain" to keep full KV cache for multiple compression ratios
+        model = ModelKVzip(original_model_name, kv_type="retain")
+        tokenizer = model.tokenizer  # Use KVZip's tokenizer
+        
+        use_kvzip = True
+        
+        if dist_config.master_process:
+            print(colored("KVZip applied successfully", "green"))
+    
     for dataset_name in dataset_names:
         dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size)
         archive_path = os.path.join("temporary", model_name.split('/')[-1])
@@ -203,10 +229,12 @@ if __name__ == '__main__':
             file_name = f"{dataset_name}_{datalen}_streamingllm.jsonl"
         elif args.quest:
             file_name = f"{dataset_name}_{datalen}_quest.jsonl"
+        elif args.kvzip:
+            file_name = f"{dataset_name}_{datalen}_kvzip.jsonl"
         else:
             file_name = f"{dataset_name}_{datalen}.jsonl"
         archive_path = os.path.join(archive_path, file_name)
-        evaluator.test(model, tokenizer, dataset, archive_path)
+        evaluator.test(model, tokenizer, dataset, archive_path, use_kvzip=use_kvzip)
         
         stats = evaluator.all_stats[-1]
         benchmark_name = dataset_name.split('/')[-2]

@@ -136,11 +136,36 @@ def generate_input_output(index, num_docs):
     random.Random(args.random_seed).shuffle(all_docs)
     
     context = '\n\n'.join([DOCUMENT_PROMPT.format(i=i+1, document=d) for i, d in enumerate(all_docs)])
-    input_text = args.template.format(
-        context=context, 
-        query=curr_q
+
+    template = args.template
+    # Split template into context_template and query_template at {context}
+    # So that formatted_context + formatted_query = input_text
+    context_end_marker = "{context}\n"
+    if context_end_marker in template:
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+    else:
+        # Fallback: use {context} without newline
+        context_end_marker = "{context}"
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+
+    # Format context part (instruction + documents)
+    formatted_context = context_template.format(
+        context=context,
     )
-    return input_text, curr_a
+
+    # Format query part (the question)
+    formatted_query = query_template.format(
+        query=curr_q,
+    )
+
+    # input_text = formatted_context + formatted_query
+    input_text = formatted_context + formatted_query
+
+    return input_text, formatted_context, formatted_query, curr_a
 
 
 def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incremental: int = 10): 
@@ -152,15 +177,15 @@ def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incre
     num_docs = incremental
     
     total_tokens = 0  # Track the total tokens generated for this example
-    while total_tokens + tokens_to_generate < max_seq_length :  
-        input_text, answer = generate_input_output(0, num_docs)
+    while total_tokens + tokens_to_generate < max_seq_length :
+        input_text, context, query, answer = generate_input_output(0, num_docs)
         # Calculate the number of tokens in the example
         total_tokens = len(TOKENIZER.text_to_tokens(input_text + f' {answer}'))
         print(f'Max length {max_seq_length} | Current length {total_tokens + tokens_to_generate} | Docs: {num_docs}')
         if total_tokens + tokens_to_generate > max_seq_length:
             num_docs -= incremental
             break
-            
+
         num_docs += incremental
         if num_docs > len(DOCS):
             num_docs = len(DOCS)
@@ -172,20 +197,23 @@ def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incre
         used_docs = num_docs
         while(True):
             try:
-                input_text, answer = generate_input_output(index + args.pre_samples, used_docs)
+                input_text, context, query, answer = generate_input_output(index + args.pre_samples, used_docs)
                 length = len(TOKENIZER.text_to_tokens(input_text)) + tokens_to_generate
                 assert length <= max_seq_length, f"{length} exceeds max_seq_length."
                 break
             except:
                 if used_docs > incremental:
                     used_docs -= incremental
-        
+
         if args.remove_newline_tab:
             input_text = ' '.join(input_text.replace('\n', ' ').replace('\t', ' ').strip().split())
-        
+            context = ' '.join(context.replace('\n', ' ').replace('\t', ' ').strip().split())
+
         formatted_output = {
             "index": index,
             "input": input_text,
+            "context": context,
+            "query": query,
             "outputs": answer,
             "length": length
         }

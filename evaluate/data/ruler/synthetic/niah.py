@@ -185,13 +185,36 @@ def generate_input_output(num_haystack):
         template = template.replace('answers', 'answer')
         type_needle_v = type_needle_v[:-1] # remove "s"
 
-    input_text = template.format(
+    # Split template into context_template and query_template at {context}
+    # So that formatted_context + formatted_query = input_text
+    context_end_marker = "{context}\n"
+    if context_end_marker in template:
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+    else:
+        # Fallback: use {context} without newline
+        context_end_marker = "{context}"
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+
+    # Format context part (instruction + haystack)
+    formatted_context = context_template.format(
         type_needle_v=type_needle_v,
         context=context,
+    )
+
+    # Format query part (the question)
+    formatted_query = query_template.format(
+        type_needle_v=type_needle_v,
         query=query,
     )
 
-    return input_text, answers
+    # input_text = formatted_context + formatted_query
+    input_text = formatted_context + formatted_query
+
+    return input_text, formatted_context, formatted_query, type_needle_v, answers
 
 
 def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incremental: int = 500):
@@ -211,8 +234,8 @@ def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incre
     num_haystack = incremental
         
     total_tokens = 0  # Track the total tokens generated for the first example
-    while total_tokens + tokens_to_generate < max_seq_length :  
-        input_text, answer = generate_input_output(num_haystack)
+    while total_tokens + tokens_to_generate < max_seq_length :
+        input_text, context, query, type_needle_v, answer = generate_input_output(num_haystack)
         # Calculate the number of tokens in the example
         total_tokens = len(TOKENIZER.text_to_tokens(input_text + ' '.join(answer)))
         print(f'Max length {max_seq_length} | Current length {total_tokens + tokens_to_generate} | Haystack: {num_haystack}')
@@ -233,20 +256,24 @@ def generate_samples(num_samples: int, max_seq_length: int, save_dir: str, incre
         used_haystack = num_haystack
         while(True):
             try:
-                input_text, answer  = generate_input_output(used_haystack)
+                input_text, context, query, type_needle_v, answer = generate_input_output(used_haystack)
                 length = len(TOKENIZER.text_to_tokens(input_text)) + tokens_to_generate
                 assert length <= max_seq_length, f"{length} exceeds max_seq_length."
                 break
             except:
                 if used_haystack > incremental:
                     used_haystack -= incremental
-        
+
         if args.remove_newline_tab:
             input_text = ' '.join(input_text.replace('\n', ' ').replace('\t', ' ').strip().split())
+            context = ' '.join(context.replace('\n', ' ').replace('\t', ' ').strip().split())
 
         formatted_output = {
             'index': index,
             "input": input_text,
+            "context": context,
+            "query": query,
+            "type_needle_v": type_needle_v,
             "outputs": answer,
             "length": length,
         }

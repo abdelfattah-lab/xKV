@@ -90,17 +90,40 @@ def generate_input_output(num_words):
 
     template = args.template
 
+    # Split template into context_template and query_template at {context}
+    # So that formatted_context + formatted_query = input_text
+    context_end_marker = "{context}\n"
+    if context_end_marker in template:
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+    else:
+        # Fallback: use {context} without newline
+        context_end_marker = "{context}"
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+
+    # Build few-shot example (full input + answer)
     input_example = template.format(
         context=context_example,
         query='',
     ) + ' '.join([f"{i + 1}. {word}" for i, word in enumerate(answer_example)])
 
-    input_text = template.format(
+    # Format context part (few-shot example + instruction + word list)
+    formatted_context = input_example + "\n" + context_template.format(
         context=context,
+    )
+
+    # Format query part (the question - which is fixed/generic for this task)
+    formatted_query = query_template.format(
         query='',
     )
 
-    return input_example + "\n" + input_text, answer
+    # input_text = formatted_context + formatted_query
+    input_text = formatted_context + formatted_query
+
+    return input_text, formatted_context, formatted_query, answer
 
 def sys_word_pair_random(num_samples: int, max_seq_length: int, save_dir: str, incremental: int = 10):
     write_jsons = []
@@ -109,17 +132,17 @@ def sys_word_pair_random(num_samples: int, max_seq_length: int, save_dir: str, i
     # Find the perfect num_words
     num_words = incremental
     
-    total_tokens = 0  
+    total_tokens = 0
     while total_tokens + tokens_to_generate < max_seq_length:
-        
-        input_text, answer = generate_input_output(num_words)
+
+        input_text, context, query, answer = generate_input_output(num_words)
         # Calculate the number of tokens in the example
         total_tokens = len(TOKENIZER.text_to_tokens(input_text + ' ' + ' '.join([f"{i + 1}. {word}" for i, word in enumerate(answer)])))
         print(f'Max length {max_seq_length} | Current length {total_tokens + tokens_to_generate} | Words: {num_words}')
         if total_tokens + tokens_to_generate > max_seq_length:
             num_words -= incremental
             break
-            
+
         num_words += incremental
         if num_words > len(words):
             num_words = len(words)
@@ -132,7 +155,7 @@ def sys_word_pair_random(num_samples: int, max_seq_length: int, save_dir: str, i
         used_words = num_words
         while(True):
             try:
-                input_text, answer = generate_input_output(used_words)
+                input_text, context, query, answer = generate_input_output(used_words)
                 length = len(TOKENIZER.text_to_tokens(input_text)) + tokens_to_generate
                 assert length <= max_seq_length, f"{length} exceeds max_seq_length."
                 break
@@ -142,10 +165,13 @@ def sys_word_pair_random(num_samples: int, max_seq_length: int, save_dir: str, i
 
         if args.remove_newline_tab:
             input_text = ' '.join(input_text.replace('\n', ' ').replace('\t', ' ').strip().split())
-        
+            context = ' '.join(context.replace('\n', ' ').replace('\t', ' ').strip().split())
+
         formatted_output = {
             'index': index,
             "input": input_text,
+            "context": context,
+            "query": query,
             "outputs": answer,
             "length": length,
         }

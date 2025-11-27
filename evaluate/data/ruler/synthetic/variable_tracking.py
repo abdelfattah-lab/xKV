@@ -119,13 +119,36 @@ def generate_input_output(num_noises, num_chains, num_hops, is_icl=False):
         template = ' '.join(template[cutoff:cutoff_ans].split()[:-1]) + template[cutoff_ans:]
 
     value = chains[0][0].split("=")[-1].strip()
-    input_text = template.format(
+
+    # Split template into context_template and query_template at {context}
+    # So that formatted_context + formatted_query = input_text
+    context_end_marker = "{context}\n"
+    if context_end_marker in template:
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+    else:
+        # Fallback: use {context} without newline
+        context_end_marker = "{context}"
+        split_idx = template.index(context_end_marker) + len(context_end_marker)
+        context_template = template[:split_idx]
+        query_template = template[split_idx:]
+
+    # Format context part (instruction + variable chains)
+    formatted_context = context_template.format(
         context=context,
+    )
+
+    # Format query part (the question)
+    formatted_query = query_template.format(
         query=value,
         num_v=num_hops+1
     )
 
-    return input_text, vars[0]
+    # input_text = formatted_context + formatted_query
+    input_text = formatted_context + formatted_query
+
+    return input_text, formatted_context, formatted_query, vars[0]
 
 
 def sys_vartrack_w_noise_random(num_samples: int, max_seq_length: int, incremental: int = 10, 
@@ -146,7 +169,7 @@ def sys_vartrack_w_noise_random(num_samples: int, max_seq_length: int, increment
         example_tokens = len(TOKENIZER.text_to_tokens(icl_example)) 
         
     while total_tokens + tokens_to_generate + example_tokens < max_seq_length :
-        input_text, answer = generate_input_output(num_noises, num_chains, num_hops, is_icl=add_fewshot & (icl_example is None))
+        input_text, context, query, answer = generate_input_output(num_noises, num_chains, num_hops, is_icl=add_fewshot & (icl_example is None))
         # Calculate the number of tokens in the example
         total_tokens = len(TOKENIZER.text_to_tokens(input_text + f' {answer}'))
         print(f'Max length {max_seq_length} | Current length {total_tokens + tokens_to_generate + example_tokens} | Noises: {num_noises}')
@@ -161,7 +184,7 @@ def sys_vartrack_w_noise_random(num_samples: int, max_seq_length: int, increment
         used_noises = num_noises
         while(True):
             try:
-                input_text, answer = generate_input_output(num_noises, num_chains, num_hops, is_icl=add_fewshot & (icl_example is None))
+                input_text, context, query, answer = generate_input_output(num_noises, num_chains, num_hops, is_icl=add_fewshot & (icl_example is None))
                 length = len(TOKENIZER.text_to_tokens(input_text)) + tokens_to_generate + example_tokens
                 assert length <= max_seq_length, f"{length} exceeds max_seq_length."
                 break
@@ -173,12 +196,18 @@ def sys_vartrack_w_noise_random(num_samples: int, max_seq_length: int, increment
             # insert icl_example between model template and input
             cutoff = input_text.index(TASKS['variable_tracking']['template'][:20])
             input_text = input_text[:cutoff] + ' ' + icl_example + '\n\n' + input_text[cutoff:]
+            # Also update context to include icl_example
+            cutoff_ctx = context.index(TASKS['variable_tracking']['template'][:20])
+            context = context[:cutoff_ctx] + ' ' + icl_example + '\n\n' + context[cutoff_ctx:]
         if args.remove_newline_tab:
             input_text = ' '.join(input_text.replace('\n', ' ').replace('\t', ' ').strip().split())
-        
+            context = ' '.join(context.replace('\n', ' ').replace('\t', ' ').strip().split())
+
         formatted_output = {
             'index': index,
             "input": input_text,
+            "context": context,
+            "query": query,
             "outputs": answer,
             "length": length,
         }

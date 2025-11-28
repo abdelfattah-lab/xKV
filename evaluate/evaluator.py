@@ -25,6 +25,7 @@ import json
 import datetime
 
 from data.dataset import Dataset
+from multi_turn_generator import Generator
 
 
 class Evaluator:
@@ -54,6 +55,9 @@ class Evaluator:
         if self.dist_config.is_distributed:
             dist.barrier()
 
+        # Create Generator once outside the loop for unified inference
+        generator = Generator(llm, tokenizer)
+
         progress_bar = tqdm(range(dataset.num_samples), desc='Testing', disable=self.dist_config.is_distributed and not self.dist_config.master_process)
         for i in range(dataset.num_samples):
             #prompt = torch.cat([dataset.tokenized_prompts[i*bsz+j] for j in range(bsz)], dim=0)
@@ -64,6 +68,40 @@ class Evaluator:
                 rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
                 for (pred, gt, classes) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
                     scores.append(max([dataset.metric(pred, g) for g in gt]))
+            elif dataset.inference_mode == 'multi_turn' and 'ruler' in dataset.dataset_name:
+                # Multi-turn inference: prefill context, then generate with query
+                # Uses Generator to properly initialize xKV cache via _prepare_cache_for_generation
+                context = dataset.tokenized_contexts[i]
+                query = dataset.tokenized_queries[i]
+
+                # 1. Prefill context (cache KV values)
+                generator.prefill(context["input_ids"])
+                # 2. Generate response for query
+                output_ids = generator.generate(query["input_ids"], max_new_tokens=dataset.gen_len)
+                pred = tokenizer.decode(output_ids[0, query["input_ids"].shape[-1]:], skip_special_tokens=True)
+                rets = [pred]
+                generator.clear()
+
+                # Score
+                for (pred, gt) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
+                    if isinstance(gt, list) and len(gt) == 1:
+                        gt = gt[0]
+                    scores.append(dataset.metric(pred, gt))
+
+            elif dataset.inference_mode == 'single_turn' and 'ruler' in dataset.dataset_name:
+                # Single-turn inference for ruler tasks using Generator
+                # Uses generate_from_prompt to properly initialize xKV cache
+                output_ids = generator.generate_from_prompt(prompt["input_ids"], max_new_tokens=dataset.gen_len)
+                pred = tokenizer.decode(output_ids[0, prompt["input_ids"].shape[-1]:], skip_special_tokens=True)
+
+                rets = [pred]
+
+                # Score
+                for (pred, gt) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
+                    if isinstance(gt, list) and len(gt) == 1:
+                        gt = gt[0]
+                    scores.append(dataset.metric(pred, gt))
+
             elif 'niah_multiturn' in dataset.dataset_name:
                 # 1. Initial context (prefill and compress)
                 # NOTE(max410011): Use `generate` to get compressed KV-cache by calling `_prepare_cache_for_generation`
@@ -122,7 +160,6 @@ class Evaluator:
                     scores.append(dataset.metric(pred, gt))
                 
             else:
-                #rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, num_logits_to_keep=1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
                 rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
                 for (pred, gt) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):

@@ -128,7 +128,7 @@ Templates = {
 }
 
 class Dataset:
-    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False):
+    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False, inference_mode="single_turn"):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.datalen = datalen
@@ -136,6 +136,7 @@ class Dataset:
         self.rank = rank
         self.world_size = world_size
         self.use_chat_template = use_chat_template
+        self.inference_mode = inference_mode
         self.is_sharded = False
 
         if dataset_name == 'niah':
@@ -146,7 +147,7 @@ class Dataset:
             self.tokenized_prompts, self.tokenized_queries, self.gt = self.get_dataset()
         elif 'ruler' in dataset_name:
             # All ruler tasks now have context/query split
-            self.tokenized_prompts, self.tokenized_queries, self.gt = self.get_dataset()
+            self.tokenized_prompts, self.tokenized_contexts, self.tokenized_queries, self.gt = self.get_dataset()
         else:
             self.tokenized_prompts, self.gt = self.get_dataset()
         
@@ -171,7 +172,9 @@ class Dataset:
             shard_tokenized_prompts, shard_gt = self.tokenized_prompts[start:end], self.gt[start:end]
             if 'multiturn' in self.dataset_name or 'ruler' in self.dataset_name:
                 shard_tokenized_queries = self.tokenized_queries[start:end]
+                shard_tokenized_contexts = self.tokenized_contexts[start:end]
                 self.tokenized_queries = shard_tokenized_queries
+                self.tokenized_contexts = shard_tokenized_contexts
             self.tokenized_prompts = shard_tokenized_prompts
             self.gt = shard_gt
             self.num_samples = len(shard_tokenized_prompts)
@@ -271,18 +274,20 @@ class Dataset:
             else:
                 # All ruler tasks with separated context and query
                 tokenized_contexts = []
+                tokenized_prompts_queries = []
                 for i in range(self.num_samples):
                     context = dataset[i]['context']
                     query = dataset[i]['query']
-
+                    input_text = context + query
                     context_ids = self.tokenizer(context, return_tensors="pt", add_special_tokens=False)
                     query_ids = self.tokenizer(query, return_tensors="pt", add_special_tokens=False)
-
+                    input_ids = self.tokenizer(input_text, return_tensors="pt", add_special_tokens=False)
                     tokenized_contexts.append(context_ids)
                     tokenized_queries.append(query_ids)
+                    tokenized_prompts_queries.append(input_ids)
                     gt.append(dataset[i]['outputs'])
 
-                return tokenized_contexts, tokenized_queries, gt
+                return tokenized_prompts_queries, tokenized_contexts, tokenized_queries, gt
         
         elif 'long_bench' in self.dataset_name:
             task = self.dataset_name.split('/')[-1]

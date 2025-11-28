@@ -88,6 +88,8 @@ def parse_args() -> Namespace:
     p.add_argument("--datalen", type=int, default=64*1024, help="The length of the context.")
     p.add_argument("--result_dir", type=str, default="results")
     p.add_argument("--use_chat_template", action="store_true", help="Whether to use chat template for long_bench tasks")
+    p.add_argument("--inference_mode", type=str, default="single_turn", choices=["single_turn", "multi_turn"],
+                   help="Inference mode: single_turn (combined prompt) or multi_turn (prefill context, then query)")
     return p.parse_args()
 
 if __name__ == '__main__':
@@ -187,7 +189,7 @@ if __name__ == '__main__':
         model = minference_patch(model)
     
     for dataset_name in dataset_names:
-        dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size, use_chat_template=args.use_chat_template)
+        dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size, use_chat_template=args.use_chat_template, inference_mode=args.inference_mode)
         archive_path = os.path.join("temporary", model_name.split('/')[-1])
         if args.xKV:
             if args.layer_merge_impl == "slerp":

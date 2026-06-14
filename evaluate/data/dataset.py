@@ -19,44 +19,24 @@ from datasets import load_dataset
 from termcolor import colored
 import random
 import numpy as np
-from collections import Counter
 
 # RULER
 from .metrics import (
-    needle_score, 
-    string_match_part, 
-    multi_number, 
-    multi_words, 
-    normalize_answer, 
+    needle_score,
+    string_match_part,
+    multi_number,
+    multi_words,
+    normalize_answer,
     rouge_score,
     retrieval_score,
     code_sim_score,
+    count_score,
+    classification_score,
+    qa_f1_score,
 )
 
 # NIAH
-from .utils import generate_random_number, read_context_files, create_contexts, NIAH_TEMPLATE, RANDOM_NEEDLE_CITIES, LONG_BENCH_TEMPLATE
-
-#### LONG_BENCH ####
-
-def f1_score_longbench(prediction, ground_truth):
-    common = Counter(prediction) & Counter(ground_truth)
-    num_same = sum(common.values())
-    if num_same == 0:
-        return 0
-    precision = 1.0 * num_same / len(prediction)
-    recall = 1.0 * num_same / len(ground_truth)
-    f1 = (2 * precision * recall) / (precision + recall)
-    return f1
-
-def qa_f1_score_longbench(prediction, ground_truth):
-    normalized_prediction = normalize_answer(prediction)
-    normalized_ground_truth = normalize_answer(ground_truth)
-
-    prediction_tokens = normalized_prediction.split()
-    ground_truth_tokens = normalized_ground_truth.split()
-    return f1_score_longbench(prediction_tokens, ground_truth_tokens)
-
-
+from .utils import LONG_BENCH_TEMPLATE
 
 METRICS_FN = {
     'niah': needle_score,
@@ -66,17 +46,19 @@ METRICS_FN = {
     'fwe': multi_words,
     'qa': string_match_part,
     
-    "long_bench/narrativeqa": qa_f1_score_longbench,
-    "long_bench/qasper": qa_f1_score_longbench,
-    "long_bench/multifieldqa_en": qa_f1_score_longbench,
-    "long_bench/hotpotqa": qa_f1_score_longbench,
-    "long_bench/2wikimqa": qa_f1_score_longbench,
-    "long_bench/musique": qa_f1_score_longbench,
+    "long_bench/narrativeqa": qa_f1_score,
+    "long_bench/qasper": qa_f1_score,
+    "long_bench/multifieldqa_en": qa_f1_score,
+    "long_bench/hotpotqa": qa_f1_score,
+    "long_bench/2wikimqa": qa_f1_score,
+    "long_bench/musique": qa_f1_score,
     "long_bench/gov_report": rouge_score,
     "long_bench/qmsum": rouge_score,
     "long_bench/multi_news": rouge_score,
-    "long_bench/triviaqa": qa_f1_score_longbench,
+    "long_bench/trec": classification_score,
+    "long_bench/triviaqa": qa_f1_score,
     "long_bench/samsum": rouge_score,
+    "long_bench/passage_count": count_score,
     "long_bench/passage_retrieval_en": retrieval_score,
     "long_bench/lcc": code_sim_score,
     "long_bench/repobench-p": code_sim_score,
@@ -128,7 +110,7 @@ Templates = {
 }
 
 class Dataset:
-    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False):
+    def __init__(self, dataset_name, tokenizer, datalen, num_samples, rank=0, world_size=1, use_chat_template=False, inference_mode="single_turn"):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.datalen = datalen
@@ -136,6 +118,7 @@ class Dataset:
         self.rank = rank
         self.world_size = world_size
         self.use_chat_template = use_chat_template
+        self.inference_mode = inference_mode
         self.is_sharded = False
 
         if dataset_name == 'niah':
@@ -144,6 +127,8 @@ class Dataset:
             self.tokenized_prompts, self.gt, self.classes = self.get_dataset()
         elif 'multiturn' in dataset_name:
             self.tokenized_prompts, self.tokenized_queries, self.gt = self.get_dataset()
+        elif 'ruler' in dataset_name:
+            self.tokenized_prompts, self.tokenized_contexts, self.tokenized_queries, self.gt = self.get_dataset()
         else:
             self.tokenized_prompts, self.gt = self.get_dataset()
         
@@ -166,9 +151,11 @@ class Dataset:
             start = rank * shard_size
             end = start + shard_size if rank != world_size - 1 else self.num_samples
             shard_tokenized_prompts, shard_gt = self.tokenized_prompts[start:end], self.gt[start:end]
-            if 'multiturn' in self.dataset_name:
+            if 'multiturn' in self.dataset_name or 'ruler' in self.dataset_name:
                 shard_tokenized_queries = self.tokenized_queries[start:end]
                 self.tokenized_queries = shard_tokenized_queries
+            if 'ruler' in self.dataset_name:
+                self.tokenized_contexts = self.tokenized_contexts[start:end]
             self.tokenized_prompts = shard_tokenized_prompts
             self.gt = shard_gt
             self.num_samples = len(shard_tokenized_prompts)
@@ -219,7 +206,7 @@ class Dataset:
     def get_dataset(self):
         if 'ruler' in self.dataset_name: # ruler/xxx
             task = self.dataset_name.split('/')[-1]
-            assert self.datalen in [2*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024], "Only support datalen of 16k, 32k, 64k, 128k"
+            assert self.datalen in [2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024, 256*1024, 512*1024], "Only support datalen of 2k, 4k, 8k, 16k, 32k, 64k, 128k, 256k, 512k"
 
             if 'llama-3' in self.tokenizer.name_or_path.lower():
                 model_dir = 'llama-3'
@@ -250,44 +237,41 @@ class Dataset:
             if 'multiturn' in self.dataset_name:
                 for i in range(self.num_samples):
                     input_text = dataset[i]['input']
-                    # Combine the first query with the input text and tokenize them jointly
                     first_query = dataset[i]['queries'][0]
                     combined_text = input_text + first_query
                     input_ids = self.tokenizer(combined_text, return_tensors="pt", add_special_tokens=False)
                     tokenized_prompts.append(input_ids)
-                    
-                    # Process remaining queries (if any)
                     tokenized_query_list = []
                     for query in dataset[i]['queries'][1:]:
                         query_ids = self.tokenizer(query, return_tensors="pt", add_special_tokens=False)
                         tokenized_query_list.append(query_ids)
-                    
                     tokenized_queries.append(tokenized_query_list)
                     gt.append(dataset[i]['answers'])
                 return tokenized_prompts, tokenized_queries, gt
             else:
+                tokenized_contexts = []
                 for i in range(self.num_samples):
                     input_text = dataset[i]['input']
                     input_ids = self.tokenizer(input_text, return_tensors="pt", add_special_tokens=False)
                     tokenized_prompts.append(input_ids)
+                    tokenized_contexts.append(input_ids.input_ids)
+                    tokenized_queries.append(input_ids.input_ids)
                     gt.append(dataset[i]['outputs'])
-
-                return tokenized_prompts, gt
+                return tokenized_prompts, tokenized_contexts, tokenized_queries, gt
         
         elif 'long_bench' in self.dataset_name:
             task = self.dataset_name.split('/')[-1]
             dataset = load_dataset('THUDM/LongBench', task, split='test', trust_remote_code=True)
-            
-            if self.num_samples > 0:
-                self.num_samples = min(self.num_samples, len(dataset))
-            else:
-                self.num_samples = len(dataset)
+            max_samples = self.num_samples if self.num_samples > 0 else float('inf')
             tokenized_prompts = []
             gt = []
             classes = []
 
             for i in range(len(dataset)):
-                if self.use_chat_template:
+                if len(tokenized_prompts) >= max_samples:
+                    break
+                use_chat_template = task not in ["lcc", "repobench-p", "samsum", "trec", "triviaqa"]
+                if use_chat_template:
                     if 'llama-3' in self.tokenizer.name_or_path.lower():
                         model_template = Templates['llama-3'].format(ctx=LONG_BENCH_TEMPLATE[task])
                     elif 'yi' in self.tokenizer.name_or_path.lower():
@@ -306,15 +290,11 @@ class Dataset:
                     model_template = LONG_BENCH_TEMPLATE[task]
 
                 input_text = model_template.format(**dataset[i])
-                # import pdb; pdb.set_trace()
-                #breakpoint()
-                # input_ids = truncate_by_tokens(input_text, self.tokenizer, self.datalen)
                 input_ids = self.tokenizer(input_text, return_tensors="pt")
-
-                #if input_ids.shape[-1] <= self.datalen and input_ids.shape[-1] > 4096:
-                tokenized_prompts.append(input_ids)
-                gt.append(dataset[i]['answers'])
-                classes.append(dataset[i]['all_classes'])
+                if input_ids.input_ids.shape[-1] <= self.datalen and input_ids.input_ids.shape[-1] > 4096:
+                    tokenized_prompts.append(input_ids)
+                    gt.append(dataset[i]['answers'])
+                    classes.append(dataset[i]['all_classes'])
             return tokenized_prompts, gt, classes
         else:
-            raise ValueError(f"Dataset {self.dataset_name} not found, please choose in ruler, persona, infini_bench, needle, niah, long_bench")
+            raise ValueError(f"Dataset {self.dataset_name} not found, please choose in ruler, long_bench, persona")

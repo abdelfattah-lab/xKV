@@ -15,12 +15,19 @@
 #
 ################################################################################
 
-# OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 8 test/eval_acc.py --datalen 131072 --method shadowKV --dataset_name "ruler/niah_single_1,ruler/niah_single_2,ruler/niah_single_3,ruler/niah_multikey_1,ruler/niah_multikey_2,ruler/niah_multikey_3,ruler/niah_multiquery,ruler/niah_multivalue,ruler/vt,ruler/cwe,ruler/fwe,ruler/qa_1,ruler/qa_2" --sparse_budget 896 --rank 160 --chunk_size 8
+# Unified eval entry for xKV and xKV-SR methods.
+#
+# xKV methods (HF model.generate + patch):
+#   python evaluate/eval_acc.py --model_name_or_path ... --flash2 [--xKV ...]
+#
+# xKV-SR methods (custom LLM engine):
+#   python evaluate/eval_acc.py --model_name_or_path ... --method shadowkv_xkv \
+#       --sparse_budget 2048 --group_size 2 --rank_k 192 --rank_v 288 --chunk_size 8
 
 import os
 import sys
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(root_dir)
+sys.path.insert(0, root_dir)
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -37,6 +44,13 @@ import json
 import numpy as np
 import random
 
+# xKV-SR method names (routed to custom LLM engine)
+XKV_SR_METHODS = {
+    'shadowkv',
+    'shadowkv_xkey', 'shadowkv_xkv',
+}
+
+
 def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -46,6 +60,7 @@ def seed_everything(seed):
     torch.backends.cudnn.deterministic = True
     torch.cuda.manual_seed_all(seed)
 
+
 class DistConfig:
     def __init__(self, is_distributed, rank, world_size, device, master_process):
         self.is_distributed = is_distributed
@@ -54,18 +69,16 @@ class DistConfig:
         self.device = device
         self.master_process = master_process
 
+
 def init_dist():
     rank = int(os.environ.get("RANK", -1))
     is_distributed = rank != -1
     if is_distributed:
         world_size = int(os.environ["WORLD_SIZE"])
-        device = f"cuda:{rank}" 
+        device = f"cuda:{rank}"
         torch.cuda.set_device(device)
-        dist.init_process_group(backend="nccl",timeout=datetime.timedelta(seconds=60*90), device_id=torch.device(device))
-
-        master_process = (
-            rank == 0
-        )
+        dist.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=60 * 90), device_id=torch.device(device))
+        master_process = rank == 0
     else:
         device = "cuda:0"
         world_size = 1
@@ -73,174 +86,233 @@ def init_dist():
 
     if master_process:
         print(colored(f"[Dist init] world_size={world_size}", 'cyan'))
-    
+
     return DistConfig(is_distributed, rank, world_size, device, master_process)
+
 
 def parse_args() -> Namespace:
     def str_to_list(arg):
         return arg.split(',')
+
     p = ArgumentParser()
     from utils import add_common_args
     add_common_args(p)
+
     p.add_argument("--dataset_name", type=str_to_list, default=["ruler/niah_single_1"])
     p.add_argument("--num_samples", type=int, default=-1)
     p.add_argument("--batch_size", type=int, default=1)
-    p.add_argument("--datalen", type=int, default=64*1024, help="The length of the context.")
+    p.add_argument("--datalen", type=int, default=64 * 1024)
     p.add_argument("--result_dir", type=str, default="results")
-    p.add_argument("--use_chat_template", action="store_true", help="Whether to use chat template for long_bench tasks")
+    p.add_argument("--use_chat_template", action="store_true")
+
+    # xKV-SR routing
+    p.add_argument("--method", type=str, default=None,
+                   choices=[None, "shadowkv", "shadowkv_xkey", "shadowkv_xkv"],
+                   help="xKV-SR method. None = xKV upstream pipeline (--xKV / baseline flags).")
+    p.add_argument("--inference_mode", type=str, default="single_turn",
+                   choices=["single_turn", "multi_turn"])
+
+    # xKV-SR hyperparams (--rank_k, --rank_v, --layer_group_size already in add_common_args)
+    p.add_argument("--sparse_budget", type=int, default=2048)
+    p.add_argument("--chunk_size", type=int, default=8)
+    p.add_argument("--rank", type=int, default=160)
+    p.add_argument("--fake_svd", action="store_true")
+    p.add_argument("--minference_sr", action="store_true", default=False)
+
     return p.parse_args()
 
-if __name__ == '__main__':
 
-    args = parse_args()
+# ---------------------------------------------------------------------------
+# xKV-SR pipeline (custom LLM engine)
+# ---------------------------------------------------------------------------
+
+def run_xkv_sr(args, dist_config):
+    from xKV_SR.models import choose_model_class
+    from evaluator import Evaluator
+    from evaluate.data.dataset import Dataset
+
     model_name = args.model_name_or_path
-    dataset_names = args.dataset_name
-    num_samples = args.num_samples
-    datalen = args.datalen
+    evaluator = Evaluator(dist_config)
 
-    seed_everything(42)
-    dist_config = init_dist()
-    
     if dist_config.master_process:
-        os.makedirs("temporary", exist_ok=True)
+        print(colored(f"[xKV-SR] method={args.method}  datasets={args.dataset_name}", 'cyan'))
 
+    LLM = choose_model_class(model_name)
+    llm = LLM(
+        model_name=model_name,
+        batch_size=args.batch_size,
+        device=dist_config.device,
+        max_length=args.datalen + 2048,
+        attn_mode=args.method,
+        dtype=torch.bfloat16,
+        sparse_budget=args.sparse_budget,
+        chunk_size=args.chunk_size,
+        rank=args.rank,
+        minference=args.minference_sr,
+        rank_k=args.rank_k,
+        rank_v=args.rank_v,
+        group_size=args.layer_group_size,
+        fake_svd=args.fake_svd,
+    )
+
+    if dist_config.master_process:
+        llm.print_kv_stats()
+
+    for dataset_name in args.dataset_name:
+        dataset = Dataset(
+            dataset_name, llm.tokenizer, args.datalen, args.num_samples,
+            dist_config.rank, dist_config.world_size,
+            inference_mode=args.inference_mode,
+        )
+        archive_path = (
+            f"temporary/{model_name.split('/')[-1]}/"
+            f"{dataset_name}_{args.datalen}_{args.method}"
+            f"_b{args.sparse_budget}_c{args.chunk_size}"
+            f"_x{args.layer_group_size}_r{args.rank}_k{args.rank_k}_v{args.rank_v}.jsonl"
+        )
+        evaluator.test(llm, llm.tokenizer, dataset, archive_path, setting=args.method)
+
+        df = evaluator.summarize()
+        if dist_config.master_process:
+            result = df[df["dataset"] == dataset_name]
+            per_dataset_stats = result.to_dict(orient="records")[0]
+            print(colored(f"Results for {dataset_name}: {per_dataset_stats}", 'cyan'))
+
+            benchmark_name = dataset_name.split('/')[-2]
+            raw_model_name = model_name.split('/')[-1]
+            os.makedirs(os.path.join(args.result_dir, benchmark_name), exist_ok=True)
+            with open(os.path.join(args.result_dir, f"{benchmark_name}/{raw_model_name}.json"), "a") as f:
+                meta_data_to_log = {
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "args": vars(args),
+                }
+                meta_data_to_log.update(per_dataset_stats)
+                json.dump(meta_data_to_log, f)
+                f.write("\n")
+
+    del llm
+    gc.collect()
+    torch.cuda.empty_cache()
+    evaluator.summarize()
+
+
+def _xkv_setting(args):
+    """Return (setting_key, file_suffix) for the current xKV pipeline args."""
+    if args.xKV:
+        if args.layer_merge_impl == "slerp":
+            key = f"minicache_l{args.start_layer_idx}_{args.end_layer_idx}"
+        elif args.kv_bits < 16:
+            key = f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bit"
+        else:
+            key = f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}"
+    elif args.snapKV:
+        key = "snapkv"
+    elif args.pyramidkv:
+        key = "pyramidkv"
+    elif args.kivi:
+        key = "kivi"
+    elif args.streamingllm:
+        key = "streamingllm"
+    elif args.quest:
+        key = "quest"
+    else:
+        key = "baseline"
+    return key
+
+
+# ---------------------------------------------------------------------------
+# xKV upstream pipeline (HF model.generate + patch)
+# ---------------------------------------------------------------------------
+
+def run_xkv(args, dist_config):
     from evaluator import Evaluator
     from data.dataset import Dataset
-    
+
+    model_name = args.model_name_or_path
     evaluator = Evaluator(dist_config)
-    
+
     if dist_config.master_process:
-        print(colored(f"data_names: {dataset_names}", 'cyan'))
-    
+        os.makedirs("temporary", exist_ok=True)
+        print(colored(f"[xKV] data_names: {args.dataset_name}", 'cyan'))
+
     from utils import load_model_and_tokenizer
     model, tokenizer = load_model_and_tokenizer(model_name, use_flash_attn2=args.flash2)
-    
+
     if dist_config.master_process:
         print("Enabled xKV: {}".format(args.xKV))
-        
+
     if args.xKV:
         from utils import apply_kv_compress_patch
         model = apply_kv_compress_patch(model, args)
 
     if args.streamingllm:
         from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="streamingllm",
-            attn_kwargs={
-                "n_local": 8064,
-                "n_init": 128
-            }
-        )
-        model = minference_patch(model)
+        model = MInference("dense", model_name, kv_type="streamingllm",
+                           attn_kwargs={"n_local": 8064, "n_init": 128})(model)
 
     if args.snapKV:
         from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="snapkv",
-            attn_kwargs={
-                "max_capacity_prompt": 8192
-            }
-        )
-        model = minference_patch(model)
-    
+        model = MInference("dense", model_name, kv_type="snapkv",
+                           attn_kwargs={"max_capacity_prompt": 8192})(model)
+
     if args.pyramidkv:
         from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="pyramidkv",
-            attn_kwargs={
-                "max_capacity_prompt": 8192
-            }
-        )
-        model = minference_patch(model)
-    
+        model = MInference("dense", model_name, kv_type="pyramidkv",
+                           attn_kwargs={"max_capacity_prompt": 8192})(model)
+
     if args.kivi:
         from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="kivi",
-            attn_kwargs={
-                "bits": 2,
-                "group_size": 128,
-                "residual_length": 128
-            }
-        )
-        model = minference_patch(model)
+        model = MInference("dense", model_name, kv_type="kivi",
+                           attn_kwargs={"bits": 2, "group_size": 128, "residual_length": 128})(model)
 
     if args.quest:
         from minference import MInference
-        minference_patch = MInference(
-            attn_type="dense", 
-            model_name=model_name, 
-            kv_type="quest",
-            attn_kwargs={
-                "chunk_size": 16,
-                "token_budget": 4096,
-            }
-        )
-        model = minference_patch(model)
-    
-    for dataset_name in dataset_names:
-        dataset = Dataset(dataset_name, tokenizer, datalen, num_samples, evaluator.dist_config.rank, evaluator.dist_config.world_size, use_chat_template=args.use_chat_template)
-        archive_path = os.path.join("temporary", model_name.split('/')[-1])
-        if args.xKV:
-            if args.layer_merge_impl == "slerp":
-                file_name = f"{dataset_name}_{datalen}_minicache_{args.start_layer_idx}_to_{args.end_layer_idx}.jsonl"
-            else:
-                if args.kv_bits < 16:
-                    file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bits_gs{args.group_size}.jsonl"
-                else:
-                    file_name = f"{dataset_name}_{datalen}_xKV-{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}.jsonl"
-        elif args.snapKV:
-            file_name = f"{dataset_name}_{datalen}_snapKV.jsonl"
-        elif args.pyramidkv:
-            file_name = f"{dataset_name}_{datalen}_pyramidkv.jsonl"
-        elif args.kivi:
-            file_name = f"{dataset_name}_{datalen}_kivi.jsonl"
-        elif args.streamingllm:
-            file_name = f"{dataset_name}_{datalen}_streamingllm.jsonl"
-        elif args.quest:
-            file_name = f"{dataset_name}_{datalen}_quest.jsonl"
-        else:
-            file_name = f"{dataset_name}_{datalen}.jsonl"
-        archive_path = os.path.join(archive_path, file_name)
-        evaluator.test(model, tokenizer, dataset, archive_path)
-        
-        stats = evaluator.all_stats[-1]
-        benchmark_name = dataset_name.split('/')[-2]
-        raw_model_name = model_name.split('/')[-1]
-        # Log the results of each datasets
-        
+        model = MInference("dense", model_name, kv_type="quest",
+                           attn_kwargs={"chunk_size": 16, "token_budget": 4096})(model)
+
+    for dataset_name in args.dataset_name:
+        dataset = Dataset(dataset_name, tokenizer, args.datalen, args.num_samples,
+                          evaluator.dist_config.rank, evaluator.dist_config.world_size,
+                          use_chat_template=args.use_chat_template)
+        setting = _xkv_setting(args)
+        archive_path = os.path.join("temporary", model_name.split('/')[-1], f"{dataset_name}_{args.datalen}_{setting}.jsonl")
+        evaluator.test(model, tokenizer, dataset, archive_path, setting=setting)
+
         df = evaluator.summarize()
-        
         if dist_config.master_process:
             df.reset_index(drop=True)
             result = df[df["dataset"] == dataset_name]
             per_dataset_stats = result.to_dict(orient="records")[0]
-            print(colored(f"Results for {dataset_name}: {per_dataset_stats}", 'cyan'), )
-    
-        if dist_config.master_process:  
+            print(colored(f"Results for {dataset_name}: {per_dataset_stats}", 'cyan'))
+
+            benchmark_name = dataset_name.split('/')[-2]
+            raw_model_name = model_name.split('/')[-1]
             os.makedirs(os.path.join(args.result_dir, f"{benchmark_name}"), exist_ok=True)
             with open(os.path.join(args.result_dir, f"{benchmark_name}/{raw_model_name}.json"), "a") as f:
                 meta_data_to_log = {
                     "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "args": vars(args)
+                    "args": vars(args),
                 }
                 meta_data_to_log.update(per_dataset_stats)
                 json.dump(meta_data_to_log, f)
                 f.write("\n")
-    
-    
+
     del model
     gc.collect()
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     evaluator.summarize(shown_avg=True)
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    seed_everything(42)
+    dist_config = init_dist()
+
+    if args.method in XKV_SR_METHODS:
+        run_xkv_sr(args, dist_config)
+    else:
+        run_xkv(args, dist_config)
+
     if dist_config.is_distributed:
         dist.destroy_process_group()

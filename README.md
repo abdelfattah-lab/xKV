@@ -59,11 +59,9 @@ Install the optional hadamard transform dependency for better quantization integ
 uv pip install -e 3rdparty/fast-hadamard-transform --no-build-isolation # Optional
 ```
 
-3. Create Datasets (for RULER evaluation only)
+3. Create Datasets (for RULER evaluation)
 ```
-python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
-cd evaluate/data/ruler
-bash create_dataset.sh "meta-llama/Meta-Llama-3.1-8B-Instruct" "llama-3"
+bash scripts/build_datasets.sh
 ```
 
 ## Accuracy Evaluations
@@ -91,17 +89,17 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy i
 ### Evaluation on RULER Benchmark
 Below we provide the example commands for running the RULER benchmarks with different suppoted KV-Cache compression results.
 #### xKV 
-Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 and 768 for each grouped keys and values.
+Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 384 and 576 for each grouped keys and values.
 ```
 # xKV-4
-CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 256 --rank_v 384 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 384 --rank_v 576 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### Single SVD
-For evaluation of Single SVD under similar compression level, replacing the arguments `--layer_group_size 1` and `--rank_k 128 --rank_v_192`.
+For evaluation of Single SVD under similar compression level, replacing the arguments `--layer_group_size 1` and `--rank_k 96 --rank_v 144`.
 
 ```
-CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 128 --rank_v 192 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
+CUDA_VISIBLE_DEVICES=4,5,6,7 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/vt" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --merge_k --merge_v --rank_k 96 --rank_v 144 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### MiniCache
@@ -113,18 +111,17 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1
 #### Customized Merge Config
 We also support customized merge config by providing a yaml file to the `--customized_merge_config` argument. By writing a yaml file you can experiment with different merging groups and different ranks for each group. Please refer to the [configs/example.yaml](configs/example.yaml) for the format. 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --customized_merge_config e
-xample.yaml 
+CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --xKV --customized_merge_config example.yaml
 ```
 
 
-### Evalaution on DeepSeek Models
+### Evaluation on DeepSeek Models
 DeepSeek’s MLA (multi-latent attention) architecture has two types of hidden states that can be cached during inference:
 + Non-RoPE Latents (the learned, position-agnostic latent vectors).
 + RoPE-based Key States (rotary-positioned keys).
 We reuse the Key and Value compression interfaces for these two elements:
-+ `--merge_k` and `--rank_k` control compression of the non-RoPE latents (treated like “Keys”).
-+ `--merge_v` and `--rank_v` control compression of the RoPE-based Key states (treated like “Values”).
++ `--merge_k` and `--rank_k` control compression of the non-RoPE latents (treated like "Keys").
++ `--merge_v` and `--rank_v` control compression of the RoPE-based Key states (treated like "Values").
 In our paper, we focus on compressing only the non-RoPE latents only.
 
 #### xKV for DeepSeek (compress only non-RoPE latents)
@@ -148,7 +145,7 @@ evaluate/eval_acc.py \
 ## Upcoming Roadmap
 - [x] Accuracy Evaluation
 - [ ] Release end-to-end system and efficiency evalution.
-- [ ] Integration with sparse attention (e.g., ShadowKV)
+- [x] Integration with sparse attention (xKV-SR, built upon ShadowKV)
 
 ## Citation
 If you find xKV useful or relevant to your project and research, please kindly cite our paper:
@@ -163,4 +160,4 @@ If you find xKV useful or relevant to your project and research, please kindly c
 ```
 
 ## Acknowledgement
-The evaluation scripts are built upon [ShadowKV](https://github.com/bytedance/ShadowKV) and [Palu](https://github.com/shadowpa0327/Palu) repository.
+The xKV-SR inference engine is built upon [ShadowKV](https://github.com/bytedance/ShadowKV). The evaluation framework is adapted from [ShadowKV](https://github.com/bytedance/ShadowKV) and [Palu](https://github.com/shadowpa0327/Palu).

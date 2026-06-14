@@ -27,116 +27,158 @@ import datetime
 from data.dataset import Dataset
 
 
+def _is_custom_llm(llm):
+    """True for xKV-SR custom engine, False for HF model."""
+    return hasattr(llm, 'model_name')
+
+
+def _model_name(llm):
+    return llm.model_name if _is_custom_llm(llm) else llm.config.name_or_path
+
+
+def _hf_generate(llm, tokenizer, prompt, gen_len, **kwargs):
+    """Run HF model.generate and return decoded string list."""
+    rets = llm.generate(
+        **(prompt.to(llm.device)),
+        max_new_tokens=gen_len,
+        top_p=1.0, temperature=0.0,
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
+        **kwargs,
+    )
+    return [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
+
+
 class Evaluator:
     def __init__(self, dist_config):
-
         self.dist_config = dist_config
-
-        # init final report
         self.all_stats = []
 
     def test(self, llm, tokenizer, dataset: Dataset, output_path: str, setting: str = 'baseline'):
-
-        # mkdir if not exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         if self.dist_config.master_process:
-            print(colored(f"[Test] {llm.config.name_or_path} on {dataset.dataset_name}, results saved to {output_path}", 'green'))
+            print(colored(f"[Test] {_model_name(llm)} on {dataset.dataset_name}, results saved to {output_path}", 'green'))
 
-        if dataset.is_sharded == False:
+        if not dataset.is_sharded:
             dataset.shard(self.dist_config.rank, self.dist_config.world_size)
 
-        bsz = 1
+        bsz = llm.batch_size if _is_custom_llm(llm) else 1
         scores = []
-        preds = []
 
-        # clear the file
         open(output_path, 'w').close()
         if self.dist_config.is_distributed:
             dist.barrier()
 
-        progress_bar = tqdm(range(dataset.num_samples), desc='Testing', disable=self.dist_config.is_distributed and not self.dist_config.master_process)
-        for i in range(dataset.num_samples):
-            #prompt = torch.cat([dataset.tokenized_prompts[i*bsz+j] for j in range(bsz)], dim=0)
+        progress_bar = tqdm(range(dataset.num_samples // bsz), desc='Testing',
+                            disable=self.dist_config.is_distributed and not self.dist_config.master_process)
+
+        for i in range(dataset.num_samples // bsz):
             prompt = dataset.tokenized_prompts[i]
+            custom = _is_custom_llm(llm)
+            rets = None
+
             if 'long_bench' in dataset.dataset_name:
-                #rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, num_logits_to_keep=1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-                rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-                rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
-                for (pred, gt, classes) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
-                    scores.append(max([dataset.metric(pred, g) for g in gt]))
+                if custom:
+                    p = prompt.input_ids if hasattr(prompt, 'input_ids') else prompt
+                    rets = llm.generate(p.to(llm.device), gen_len=dataset.gen_len, verbose=False, top_p=1.0, temperature=0.0)
+                else:
+                    rets = _hf_generate(llm, tokenizer, prompt, dataset.gen_len)
+                for pred, gt, classes in zip(rets, dataset.gt[i*bsz:(i+1)*bsz], dataset.classes[i*bsz:(i+1)*bsz]):
+                    scores.append(max([dataset.metric(pred, g, all_classes=classes) for g in gt]))
+
+            elif 'ruler' in dataset.dataset_name and custom and dataset.inference_mode == 'multi_turn':
+                context = dataset.tokenized_contexts[i]
+                query = dataset.tokenized_queries[i]
+                ctx_ids = context.input_ids if hasattr(context, 'input_ids') else context
+                llm.prefill(ctx_ids.to(llm.device))
+                q_ids = query.input_ids if hasattr(query, 'input_ids') else query
+                rets = llm.generate(q_ids.to(llm.device), gen_len=dataset.gen_len, cont=True, top_p=1.0, temperature=0.0)
+                for pred, gt in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
+                    if isinstance(gt, list) and len(gt) == 1:
+                        gt = gt[0]
+                    scores.append(dataset.metric(pred, gt))
+
             elif 'niah_multiturn' in dataset.dataset_name:
-                # 1. Initial context (prefill and compress)
-                # NOTE(max410011): Use `generate` to get compressed KV-cache by calling `_prepare_cache_for_generation`
-                first_ret = llm.generate(
-                    **(prompt.to(llm.device)),
-                    return_dict_in_generate=True,
-                    max_new_tokens=dataset.gen_len,
-                    top_p=1.0, 
-                    temperature=0.0,
-                    do_sample=False,
-                    pad_token_id=tokenizer.eos_token_id,
-                )
-                context = first_ret.sequences
-                past_key_values = first_ret.past_key_values
-                
-                # Store the first response
-                first_generated_ids = first_ret.sequences[0, prompt.input_ids.shape[-1]:]
-                first_response = tokenizer.decode(first_generated_ids, skip_special_tokens=True)
-                rets = [[first_response]]
-                # 2. Multi-turn queries
-                for query in dataset.tokenized_queries[i]:
-                    generated = []
-                    cur_input = query["input_ids"].to(llm.device)
-                    # NOTE(max410011): Reduece gen_len to speed up, you may need longer gen_len for other tasks
-                    # for step in range(dataset.gen_len):
-                    for _ in range(10):
-                        with torch.no_grad():
-                            output = llm(
-                                input_ids=cur_input,
-                                past_key_values=past_key_values,
-                                return_dict=True,
-                            )
-
-                        next_token_logits = output.logits[:, -1, :]  # (B, vocab_size)
-                        next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)  # greedy decoding
-
-                        generated.append(next_token)
-                        past_key_values = output.past_key_values
-                    
-                        if next_token.item() == tokenizer.eos_token_id:
-                            break
-                        
-                        cur_input = next_token
-
-                    generated_ids = torch.cat(generated, dim=-1)  # (1, T)
-                    rets.append([tokenizer.decode(generated_ids[0], skip_special_tokens=True)])
-                
-                # Save the results
-                for (pred, gt) in zip(rets, dataset.gt[i]):
-                    if isinstance(gt, list):
-                        if len(gt) == 1:
-                            gt = gt[0]
-                    if isinstance(pred, list):
-                        if len(pred) == 1:
-                            pred = pred[0]
+                if custom:
+                    p_ids = prompt.input_ids if hasattr(prompt, 'input_ids') else prompt
+                    first_ret = llm.generate(p_ids.to(llm.device), gen_len=dataset.gen_len, top_p=1.0, temperature=0.0)
+                    rets = [first_ret[0]]
+                    for query in dataset.tokenized_queries[i]:
+                        q_ids = query.input_ids if hasattr(query, 'input_ids') else query
+                        rets.append(llm.generate(q_ids.to(llm.device), cont=True, gen_len=dataset.gen_len, top_p=1.0, temperature=0.0)[0])
+                else:
+                    first_ret = llm.generate(
+                        **(prompt.to(llm.device)),
+                        return_dict_in_generate=True,
+                        max_new_tokens=dataset.gen_len,
+                        top_p=1.0, temperature=0.0,
+                        do_sample=False,
+                        pad_token_id=tokenizer.eos_token_id,
+                    )
+                    past_kv = first_ret.past_key_values
+                    first_response = tokenizer.decode(first_ret.sequences[0, prompt.input_ids.shape[-1]:], skip_special_tokens=True)
+                    rets = [first_response]
+                    for query in dataset.tokenized_queries[i]:
+                        cur_input = query["input_ids"].to(llm.device)
+                        generated = []
+                        for _ in range(10):
+                            with torch.no_grad():
+                                out = llm(input_ids=cur_input, past_key_values=past_kv, return_dict=True)
+                            next_tok = torch.argmax(out.logits[:, -1, :], dim=-1, keepdim=True)
+                            generated.append(next_tok)
+                            past_kv = out.past_key_values
+                            if next_tok.item() == tokenizer.eos_token_id:
+                                break
+                            cur_input = next_tok
+                        rets.append(tokenizer.decode(torch.cat(generated, dim=-1)[0], skip_special_tokens=True))
+                for pred, gt in zip(rets, dataset.gt[i]):
+                    if isinstance(gt, list) and len(gt) == 1:
+                        gt = gt[0]
+                    if isinstance(pred, list) and len(pred) == 1:
+                        pred = pred[0]
                     scores.append(dataset.metric(pred, gt))
-                
+
+            elif 'persona' in dataset.dataset_name and custom:
+                llm.generate(prompt.to(llm.device), gen_len=0, verbose=False, top_p=0.9, temperature=0.0)
+                queries = dataset.queries[i]
+                rets_list = []
+                for query, gts in zip(queries, dataset.gt[i]):
+                    ret = llm.generate(llm.encode(query, template="chat"), cont=True, gen_len=dataset.gen_len, top_p=0.9, temperature=0.0)
+                    rets_list.append(ret)
+                    pred = ret[0]
+                    if isinstance(gts, list) and len(gts) == 1:
+                        gts = gts[0]
+                    scores.append(dataset.metric(pred, gts))
+                rets = rets_list
+
             else:
-                #rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, num_logits_to_keep=1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-                rets = llm.generate(**(prompt.to(llm.device)), max_new_tokens=dataset.gen_len, top_p=1.0, temperature=0.0, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-                rets = [tokenizer.decode(rets[0][prompt.input_ids.shape[-1]:], skip_special_tokens=True)]
-                for (pred, gt) in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
-                    if isinstance(gt, list):
-                        if len(gt) == 1:
-                            gt = gt[0]
+                # Default: single-turn (RULER single_turn, niah, etc.)
+                if custom:
+                    p = prompt.input_ids if hasattr(prompt, 'input_ids') else prompt
+                    rets = llm.generate(p.to(llm.device), gen_len=dataset.gen_len, top_p=1.0, temperature=0.0)
+                else:
+                    rets = _hf_generate(llm, tokenizer, prompt, dataset.gen_len)
+                for pred, gt in zip(rets, dataset.gt[i*bsz:(i+1)*bsz]):
+                    if isinstance(gt, list) and len(gt) == 1:
+                        gt = gt[0]
                     scores.append(dataset.metric(pred, gt))
-            
+
             progress_bar.update(1)
             avg_score = sum(scores) / len(scores)
-            max_gpu_mem = torch.cuda.max_memory_allocated(llm.device)
-            progress_bar.set_postfix({'avg_score': avg_score, 'max_memory (GB)': max_gpu_mem / 1024 / 1024 / 1024})
+            max_mem = torch.cuda.max_memory_allocated(llm.device if hasattr(llm, 'device') else 0) / 1024**3
+            progress_bar.set_postfix({'avg_score': avg_score, 'max_memory (GB)': max_mem})
 
-            preds = {
+            if dataset.dataset_name == 'niah':
+                preds = {
+                    "context_length": dataset.ctx_len[i*bsz:(i+1)*bsz],
+                    "depth_percent": dataset.depth_pct[i*bsz:(i+1)*bsz],
+                    "response": rets,
+                    "answer": dataset.gt[i*bsz:(i+1)*bsz],
+                    "correct": scores[i*bsz:(i+1)*bsz],
+                    "avg_score": avg_score,
+                }
+            else:
+                preds = {
                     "prediction": rets,
                     "ground_truth": dataset.gt[i*bsz:(i+1)*bsz],
                     "correct": scores,
@@ -146,20 +188,16 @@ class Evaluator:
 
             with open(output_path, "a", encoding="utf8") as fout:
                 fout.write(json.dumps(preds, ensure_ascii=False) + "\n")
-            # if self.dist_config.is_distributed:
-            #     dist.barrier()
 
         progress_bar.close()
-        avg_score = sum(scores) / len(scores)
+        avg_score = sum(scores) / len(scores) if scores else 0.0
 
-        self.all_stats.append(
-            {
-                'model': llm.config.name_or_path,
-                'dataset': dataset.dataset_name,
-                'samples': dataset.num_samples,
-                f'{setting}': avg_score,
-            }
-        )
+        self.all_stats.append({
+            'model': _model_name(llm),
+            'dataset': dataset.dataset_name,
+            'samples': dataset.num_samples,
+            f'{setting}': avg_score,
+        })
         if self.dist_config.is_distributed:
             dist.barrier()
 
@@ -173,29 +211,18 @@ class Evaluator:
             dist.barrier()
             if self.dist_config.master_process:
                 df = pd.concat(output)
-                # Define the columns you want to calculate the mean for (excluding 'samples')
                 setting_columns = [col for col in df.columns if col not in ['model', 'dataset', 'samples']]
-
-                # Calculate the sum for 'samples'
                 samples_sum = df.groupby(['model', 'dataset'])['samples'].sum()
-
-                # Define the aggregation dictionary for other settings
-                agg_dict = {col: 'mean' for col in setting_columns}
-
-                # Calculate the weighted mean for each setting column based on 'samples'
                 weighted_means = df.groupby(['model', 'dataset']).apply(lambda x: pd.Series({
                     col: (x[col] * x['samples']).sum() / x['samples'].sum() for col in setting_columns
                 }))
-
-                # Combine the weighted means with the sum of samples
                 df = weighted_means.join(samples_sum).reset_index()
-        
-        if self.dist_config.master_process and shown_avg:
-            # add a row for the average
+
+        if self.dist_config.master_process:
             numeric_columns = df.select_dtypes(include='number')
             mean_values = numeric_columns.mean()
             mean_row = pd.DataFrame({col: [mean_values[col] if col in mean_values else 'mean'] for col in df.columns})
             df_with_mean = pd.concat([df, mean_row], ignore_index=True)
             print(df_with_mean.to_markdown(index=False))
-            
+
         return df

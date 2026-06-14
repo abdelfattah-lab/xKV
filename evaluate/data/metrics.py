@@ -112,7 +112,21 @@ def needle_score(prediction, ground_truth):
     return score
 
 
-def count_score(prediction, ground_truth):
+def classification_score(prediction, ground_truth, **kwargs):
+    all_classes = kwargs["all_classes"]
+    em_match_list = []
+    for class_name in all_classes:
+        if class_name in prediction:
+            em_match_list.append(class_name)
+    for match_term in list(em_match_list):
+        if match_term in ground_truth and match_term != ground_truth:
+            em_match_list.remove(match_term)
+    if ground_truth in em_match_list:
+        return 1.0 / len(em_match_list)
+    return 0.0
+
+
+def count_score(prediction, ground_truth, **kwargs):
     numbers = re.findall(r"\d+", prediction)
     right_num = 0
     for number in numbers:
@@ -121,7 +135,7 @@ def count_score(prediction, ground_truth):
     final_score = 0.0 if len(numbers) == 0 else right_num / len(numbers)
     return float(final_score)
 
-def retrieval_score(prediction, ground_truth):
+def retrieval_score(prediction, ground_truth, **kwargs):
     pattern = r'Paragraph (\d+)'
     matches = re.findall(pattern, ground_truth)
     ground_truth_id = matches[0]
@@ -145,7 +159,7 @@ def retrieval_zh_score(prediction, ground_truth):
     final_score = 0.0 if len(numbers) == 0 else right_num / len(numbers)
     return float(final_score)
 
-def code_sim_score(prediction, ground_truth):
+def code_sim_score(prediction, ground_truth, **kwargs):
     all_lines = prediction.lstrip('\n').split('\n')
     prediction = ""
     for line in all_lines:
@@ -155,7 +169,7 @@ def code_sim_score(prediction, ground_truth):
     return (fuzz.ratio(prediction, ground_truth) / 100)
 
     
-def rouge_score(prediction, ground_truth):
+def rouge_score(prediction, ground_truth, **kwargs):
     rouge = Rouge()
     try:
         scores = rouge.get_scores([prediction], [ground_truth], avg=True)
@@ -179,7 +193,7 @@ def f1_score(prediction, ground_truth):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
-def qa_f1_score(prediction, ground_truth):
+def qa_f1_score(prediction, ground_truth, **kwargs):
     normalized_prediction = normalize_answer(prediction)
     normalized_ground_truth = normalize_answer(ground_truth)
 
@@ -188,7 +202,7 @@ def qa_f1_score(prediction, ground_truth):
     return f1_score(prediction_tokens, ground_truth_tokens)
 
 
-def qa_f1_zh_score(prediction, ground_truth):
+def qa_f1_zh_score(prediction, ground_truth, **kwargs):
     prediction_tokens = list(jieba.cut(prediction, cut_all=False))
     ground_truth_tokens = list(jieba.cut(ground_truth, cut_all=False))
     prediction_tokens = [normalize_zh_answer(token) for token in prediction_tokens]

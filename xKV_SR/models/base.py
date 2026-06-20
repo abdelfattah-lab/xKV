@@ -30,8 +30,8 @@ import torch.cuda.nvtx as nvtx
 from torch.profiler import profile, record_function, ProfilerActivity
 
 from .tensor_op import sample_token, layer_norm, minference_prefill_kernel
-from .kv_cache import KV_Cache, ShadowKVCache, ShadowKVCache_CPU
-from .kv_cache_xkv import ShadowKVCache_xKey, ShadowKVCache_xKV, ShadowKVCache_xKey_CPU, ShadowKVCache_xKV_CPU
+from .kv_cache import KV_Cache, ShadowKVCache
+from .kv_cache_xkv import ShadowKVCache_xKey, ShadowKVCache_xKV
 from .merge_configs import xKVConfig
 
 class LLM:
@@ -49,16 +49,10 @@ class LLM:
             self.kv_cache = KV_Cache(config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size)
         elif self.attn_mode.lower() == 'shadowkv':
             self.kv_cache = ShadowKVCache(config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size, rank=rank)
-        elif self.attn_mode.lower() == 'shadowkv_cpu':
-            self.kv_cache = ShadowKVCache_CPU(config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size, rank=rank)
-        elif self.attn_mode.lower() == 'shadowkv_xkey':
+        elif self.attn_mode.lower() == 'xk_sr':
             self.kv_cache = ShadowKVCache_xKey(config, merge_config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size)
-        elif self.attn_mode.lower() == 'shadowkv_xkv':
+        elif self.attn_mode.lower() == 'xkv_sr':
             self.kv_cache = ShadowKVCache_xKV(config, merge_config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size)
-        elif self.attn_mode.lower() == 'shadowkv_xkey_cpu':
-            self.kv_cache = ShadowKVCache_xKey_CPU(config, merge_config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size)
-        elif self.attn_mode.lower() == 'shadowkv_xkv_cpu':
-            self.kv_cache = ShadowKVCache_xKV_CPU(config, merge_config, max_length=self.max_length, device=self.device, dtype=self.dtype, batch_size=self.batch_size, sparse_budget=sparse_budget, chunk_size=chunk_size)
         else:
             raise ValueError(f"Invalid attention mode {self.attn_mode}")
 
@@ -141,9 +135,7 @@ class LLM:
             else:
                 hidden_states = flash_attn_with_kvcache(q=query_states.transpose(1, 2), k_cache=key_states.transpose(1, 2), v_cache=value_states.transpose(1, 2), causal=True)
 
-        elif isinstance(self.kv_cache, ShadowKVCache) or isinstance(self.kv_cache, ShadowKVCache_CPU) or \
-             isinstance(self.kv_cache, ShadowKVCache_xKey) or isinstance(self.kv_cache, ShadowKVCache_xKV) or \
-             isinstance(self.kv_cache, ShadowKVCache_xKey_CPU) or isinstance(self.kv_cache, ShadowKVCache_xKV_CPU):
+        elif isinstance(self.kv_cache, (ShadowKVCache, ShadowKVCache_xKey, ShadowKVCache_xKV)):
 
             if q_len > 1024: # prefill
                 with self._maybe_record_function("batch_prefill"):
@@ -152,8 +144,6 @@ class LLM:
                         self.kv_cache.get_svd(key_states, layer_idx, fake_svd=self.fake_svd)
                     elif isinstance(self.kv_cache, ShadowKVCache_xKV):
                         self.kv_cache.get_svd(key_states, value_states, layer_idx, fake_svd=self.fake_svd)
-                    elif isinstance(self.kv_cache, ShadowKVCache_xKV_CPU):
-                        self.kv_cache.get_svd(key_states, value_states, layer_idx)
                     else:
                         self.kv_cache.get_svd(key_states, layer_idx)
                     query_states, key_states = self.apply_rotary_pos_emb(query_states, key_states, position_ids)
@@ -178,30 +168,17 @@ class LLM:
                     position_ids = self.kv_cache.get_retrieval_position_ids(layer_idx=layer_idx, query_states=query_states)
 
                 # multi-stream
-                if not isinstance(self.kv_cache, ShadowKVCache_xKV_CPU):
-                    curr_stream = torch.cuda.current_stream()
-                    get_value_stream = self.kv_cache.copy_stream
+                curr_stream = torch.cuda.current_stream()
+                get_value_stream = self.kv_cache.copy_stream
 
-                if isinstance(self.kv_cache, ShadowKVCache_xKV_CPU):
-                    with self._maybe_record_function("get_value_cache_xKV_cpu"):
-                        value_states = self.kv_cache.get_value_cache(layer_idx, position_ids, self.cos_sin_cache)
-                else:
-                    with self._maybe_record_function("get_value_cache_offload_stream"):
-                        with torch.cuda.stream(get_value_stream):
-                            get_value_stream.wait_stream(curr_stream)
-                            value_states = self.kv_cache.get_value_cache(layer_idx, position_ids)
+                with self._maybe_record_function("get_value_cache_offload_stream"):
+                    with torch.cuda.stream(get_value_stream):
+                        get_value_stream.wait_stream(curr_stream)
+                        value_states = self.kv_cache.get_value_cache(layer_idx, position_ids)
 
-                # gather key cache from GPU and RoPE it (should be hide by CPU offloading time)
-                if isinstance(self.kv_cache, ShadowKVCache_CPU) or isinstance(self.kv_cache, ShadowKVCache_xKey_CPU) or isinstance(self.kv_cache, ShadowKVCache_xKV_CPU):
-                    with self._maybe_record_function("get_key_cache"):
-                        key_states = self.kv_cache.get_key_cache(layer_idx=layer_idx, position_ids=position_ids, rope_func=self.apply_rotary_pos_emb_single, cos_sin_cache=self.cos_sin_cache)
-                else:
-                    with self._maybe_record_function("get_key_cache"):
-                        key_states = self.kv_cache.get_key_cache(layer_idx=layer_idx, position_ids=position_ids, rope_func=self.apply_rotary_pos_emb_single)
-
-                if isinstance(self.kv_cache, ShadowKVCache_CPU) or isinstance(self.kv_cache, ShadowKVCache_xKey_CPU):
-                    with self._maybe_record_function("wait_get_value_stream"):
-                        curr_stream.wait_stream(get_value_stream)
+                # gather key cache from GPU and RoPE it (should be hidden by CPU offloading time)
+                with self._maybe_record_function("get_key_cache"):
+                    key_states = self.kv_cache.get_key_cache(layer_idx=layer_idx, position_ids=position_ids, rope_func=self.apply_rotary_pos_emb_single)
 
                 # flash attention
                 with self._maybe_record_function("flash_attn_with_kvcache"):

@@ -17,12 +17,13 @@
 
 # Unified eval entry for xKV and xKV-SR methods.
 #
-# xKV methods (HF model.generate + patch):
-#   python evaluate/eval_acc.py --model_name_or_path ... --flash2 [--xKV ...]
+# xKV / baseline methods (HF model.generate + patch):
+#   python evaluate/eval_acc.py --model_name_or_path ... --flash2 --method xkv [--rank_k ... --rank_v ...]
+#   python evaluate/eval_acc.py --model_name_or_path ... --flash2 --method kivi
 #
 # xKV-SR methods (custom LLM engine):
-#   python evaluate/eval_acc.py --model_name_or_path ... --method shadowkv_xkv \
-#       --sparse_budget 2048 --group_size 2 --rank_k 192 --rank_v 288 --chunk_size 8
+#   python evaluate/eval_acc.py --model_name_or_path ... --method xkv_sr \
+#       --sparse_budget 2048 --layer_group_size 2 --rank_k 192 --rank_v 288 --chunk_size 8
 
 import os
 import sys
@@ -47,7 +48,7 @@ import random
 # xKV-SR method names (routed to custom LLM engine)
 XKV_SR_METHODS = {
     'shadowkv',
-    'shadowkv_xkey', 'shadowkv_xkv',
+    'xk_sr', 'xkv_sr',
 }
 
 
@@ -105,10 +106,12 @@ def parse_args() -> Namespace:
     p.add_argument("--result_dir", type=str, default="results")
     p.add_argument("--use_chat_template", action="store_true")
 
-    # xKV-SR routing
+    # method routing
     p.add_argument("--method", type=str, default=None,
-                   choices=[None, "shadowkv", "shadowkv_xkey", "shadowkv_xkv"],
-                   help="xKV-SR method. None = xKV upstream pipeline (--xKV / baseline flags).")
+                   choices=[None, "dense", "xkv", "streamingllm", "snapkv", "pyramidkv", "kivi", "quest",
+                            "shadowkv", "xk_sr", "xkv_sr"],
+                   help="Compression method. None/dense = baseline; xkv = xKV SVD pipeline; "
+                        "xk_sr/xkv_sr/shadowkv = xKV-SR custom engine.")
     p.add_argument("--inference_mode", type=str, default="single_turn",
                    choices=["single_turn", "multi_turn"])
 
@@ -197,27 +200,19 @@ def run_xkv_sr(args, dist_config):
 
 
 def _xkv_setting(args):
-    """Return (setting_key, file_suffix) for the current xKV pipeline args."""
-    if args.xKV:
+    """Return setting key for result logging."""
+    m = args.method
+    if m == "xkv":
         if args.layer_merge_impl == "slerp":
-            key = f"minicache_l{args.start_layer_idx}_{args.end_layer_idx}"
+            return f"minicache_l{args.start_layer_idx}_{args.end_layer_idx}"
         elif args.kv_bits < 16:
-            key = f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bit"
+            return f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}_{args.kv_bits}bit"
         else:
-            key = f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}"
-    elif args.snapKV:
-        key = "snapkv"
-    elif args.pyramidkv:
-        key = "pyramidkv"
-    elif args.kivi:
-        key = "kivi"
-    elif args.streamingllm:
-        key = "streamingllm"
-    elif args.quest:
-        key = "quest"
+            return f"xkv{args.layer_group_size}_k{args.rank_k}_v{args.rank_v}"
+    elif m in ("snapkv", "pyramidkv", "kivi", "streamingllm", "quest"):
+        return m
     else:
-        key = "baseline"
-    return key
+        return "dense"
 
 
 # ---------------------------------------------------------------------------
@@ -233,42 +228,35 @@ def run_xkv(args, dist_config):
 
     if dist_config.master_process:
         os.makedirs("temporary", exist_ok=True)
-        print(colored(f"[xKV] data_names: {args.dataset_name}", 'cyan'))
+        print(colored(f"[xKV] method={args.method} data_names: {args.dataset_name}", 'cyan'))
 
     from utils import load_model_and_tokenizer
     model, tokenizer = load_model_and_tokenizer(model_name, use_flash_attn2=args.flash2)
 
-    if dist_config.master_process:
-        print("Enabled xKV: {}".format(args.xKV))
-
-    if args.xKV:
+    if args.method == "xkv":
         from utils import apply_kv_compress_patch
         model = apply_kv_compress_patch(model, args)
-
-    if args.streamingllm:
+    elif args.method == "streamingllm":
         from minference import MInference
         model = MInference("dense", model_name, kv_type="streamingllm",
                            attn_kwargs={"n_local": 8064, "n_init": 128})(model)
-
-    if args.snapKV:
+    elif args.method == "snapkv":
         from minference import MInference
         model = MInference("dense", model_name, kv_type="snapkv",
                            attn_kwargs={"max_capacity_prompt": 8192})(model)
-
-    if args.pyramidkv:
+    elif args.method == "pyramidkv":
         from minference import MInference
         model = MInference("dense", model_name, kv_type="pyramidkv",
                            attn_kwargs={"max_capacity_prompt": 8192})(model)
-
-    if args.kivi:
+    elif args.method == "kivi":
         from minference import MInference
         model = MInference("dense", model_name, kv_type="kivi",
                            attn_kwargs={"bits": 2, "group_size": 128, "residual_length": 128})(model)
-
-    if args.quest:
+    elif args.method == "quest":
         from minference import MInference
         model = MInference("dense", model_name, kv_type="quest",
                            attn_kwargs={"chunk_size": 16, "token_budget": 4096})(model)
+    # else: dense baseline, no patch
 
     for dataset_name in args.dataset_name:
         dataset = Dataset(dataset_name, tokenizer, args.datalen, args.num_samples,

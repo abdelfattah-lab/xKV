@@ -34,6 +34,9 @@ Mohamed S. Abdelfattah<sup>1</sup>
 - [2026.06.15]:🎉 xKV accepted at **ICML 2026**! We release the code of xK-SR and xKV-SR.
 - [2025.03.24]:🚀 We release the 1st version of arXiv and code of xKV
 
+## Upcoming Roadmap
+- [ ] Release end-to-end system and efficiency evaluation.
+
 ## TL;DR
 We introduce xKV, a simple yet effective post-training KV-Cache compression method that jointly factorizes grouped-layer KV-Cache into a shared low-rank subspace, leveraging the well-aligned dominant singular vectors across layers. xKV achieves up to **8× KV-Cache compression** while maintaining accuracy on long-context tasks. Combined with Selective Reconstruction (SR) at decode time, **xKV-SR achieves up to 4.23× end-to-end speedup** over standard attention and **30% higher throughput** over strong baselines at similar accuracy.
 
@@ -110,67 +113,69 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy o
 Below we provide example commands for running the RULER benchmark.
 #### xKV 
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 384 and 576 for each grouped keys and values.
-```
+```bash
 # xKV-4
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 --flash2 \
-    --dataset_name "ruler/vt" \
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 --flash2 \
     --method xkv --merge_k --merge_v --rank_k 384 --rank_v 576 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### Single SVD
 For evaluation of Single SVD under a similar compression level, use `--layer_group_size 1` with `--rank_k 96 --rank_v 144`.
 
-```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 --flash2 \
-    --dataset_name "ruler/vt" \
+```bash
+# Single SVD (gs=1, rank_k=96, rank_v=144)
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 --flash2 \
     --method xkv --merge_k --merge_v --rank_k 96 --rank_v 144 --layer_group_size 1 --start_layer_idx 0 --end_layer_idx -1
 ```
 
 #### MiniCache
 This command enables the MiniCache approach by specifying `--layer_merge_impl slerp`. The layers 16 through 31 are compressed.
-```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 --flash2 \
-    --dataset_name "ruler/vt" \
+```bash
+# MiniCache (slerp, gs=2, layers 16-31)
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 --flash2 \
     --method xkv --merge_k --merge_v --layer_merge_impl slerp --layer_group_size 2 --start_layer_idx 16 --end_layer_idx 31
 ```
 
 #### ShadowKV / xK-SR / xKV-SR
 ShadowKV ([Sun et al., 2024](https://github.com/bytedance/ShadowKV)) uses single-layer SVD on keys with sparse token selection; xK-SR replaces the per-layer SVD with cross-layer SVD. xKV-SR further compresses values on-GPU.
-```
+```bash
 # ShadowKV baseline (gs=1 ≡ original ShadowKV, rank_k=96, sparse_budget=2048)
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 \
-    --dataset_name "ruler/vt" \
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 \
     --method xk_sr --sparse_budget 2048 --chunk_size 8 --layer_group_size 1 --rank_k 96
 ```
 
-```
+```bash
 # xK-SR (gs=4, rank_k=384, sparse_budget=2048)
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 \
-    --dataset_name "ruler/vt" \
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 \
     --method xk_sr --sparse_budget 2048 --chunk_size 8 --layer_group_size 4 --rank_k 384
+```
 
+```bash
 # xKV-SR (gs=4, rank_k=384, rank_v=576, sparse_budget=2048)
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py \
-    --datalen 65536 \
-    --dataset_name "ruler/vt" \
+python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/vt" --datalen 65536 \
     --method xkv_sr --sparse_budget 2048 --chunk_size 8 --layer_group_size 4 --rank_k 384 --rank_v 576
 ```
 
 #### Customized Merge Config
-We also support customized merge config by providing a yaml file to the `--customized_merge_config` argument. By writing a yaml file you can experiment with different merging groups and different ranks for each group. Please refer to the [configs/example.yaml](configs/example.yaml) for the format. 
-```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 evaluate/eval_acc.py --datalen 65536 --batch_size 1 --dataset_name "ruler/niah_single_1" --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct --method xkv --customized_merge_config example.yaml
+We also support customized merge config by providing a yaml file to the `--customized_merge_config` argument. By writing a yaml file you can experiment with different merging groups and different ranks for each group. Please refer to the [configs/example.yaml](configs/example.yaml) for the format.
+```bash
+# Customized merge config (example.yaml)
+python evaluate/eval_acc.py \
+    --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --dataset_name "ruler/niah_single_1" --datalen 65536 --batch_size 1 \
+    --method xkv --customized_merge_config example.yaml
 ```
 
 
@@ -185,24 +190,13 @@ In our paper, we focus on compressing only the non-RoPE latents only.
 
 #### xKV for DeepSeek (compress only non-RoPE latents)
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 512 for grouped latents.
+```bash
+# xKV for DeepSeek (gs=4, rank_k=512, non-RoPE latents only)
+python evaluate/eval_acc.py \
+    --model_name_or_path deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct \
+    --dataset_name "long_bench/repobench-p" --datalen 65536 --batch_size 1 --flash2 \
+    --method xkv --merge_k --rank_k 512 --layer_group_size 4 --start_layer_idx 0 --end_layer_idx -1
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 OMP_NUM_THREADS=48 torchrun --standalone --nnodes=1 --nproc_per_node 4 \
-evaluate/eval_acc.py \
---datalen 65536 \
---batch_size 1 \
---dataset_name "long_bench/repobench-p" \
---model_name_or_path deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct \
---method xkv \
---merge_k \
---rank_k 512 \
---layer_group_size 4 \
---start_layer_idx 0 \
---end_layer_idx -1 \
---flash2
-```
-
-## Upcoming Roadmap
-- [ ] Release end-to-end system and efficiency evaluation.
 
 ## Efficiency
 <div align="center">

@@ -102,16 +102,15 @@ We provide an evaluation script `evaluate/eval_acc.py` to measure the accuracy o
 + `--rank_k`, `--rank_v`: SVD rank per group for keys and values (default: `256` / `768`). Scale proportionally with `--layer_group_size` for iso-compression comparisons.
 + `--sparse_budget`: Sparse token budget for xKV-SR attention (default: `2048`). `--chunk_size`: token chunk granularity for sparse selection (default: `8`).
 
-> [!NOTE] 
+> [!NOTE]
 > When increasing the layer group size, you often need to adjust these ranks for a fair comparison. For instance, if you use `rank_k=128` for `layer_group_size=1`, then to compare performance under `layer_group_size=2`, set `rank_k=256` so that the average rank per layer is similar.
 
-> [!WARNING] 
+> [!WARNING]
 > When evaluating Qwen series, please pass `--flash2` to switch backend to FlashAttention 2. [ref](https://github.com/huggingface/transformers/issues/38002)
----
 
 ### Evaluation on RULER Benchmark
 Below we provide example commands for running the RULER benchmark.
-#### xKV 
+#### xKV
 Enables xKV compression for all layers (start_layer_idx=0 to end_layer_idx=-1), grouping every 4 layers (layer_group_size=4), using ranks 384 and 576 for each grouped keys and values.
 ```bash
 # xKV-4
@@ -171,11 +170,11 @@ python evaluate/eval_acc.py \
 #### Customized Merge Config
 We also support customized merge config by providing a yaml file to the `--customized_merge_config` argument. By writing a yaml file you can experiment with different merging groups and different ranks for each group. Please refer to the [configs/example.yaml](configs/example.yaml) for the format.
 ```bash
-# Customized merge config (example.yaml)
+# Customized merge config (configs/example.yaml)
 python evaluate/eval_acc.py \
     --model_name_or_path meta-llama/Meta-Llama-3.1-8B-Instruct \
     --dataset_name "ruler/niah_single_1" --datalen 65536 --batch_size 1 \
-    --method xkv --customized_merge_config example.yaml
+    --method xkv --customized_merge_config configs/example.yaml
 ```
 
 

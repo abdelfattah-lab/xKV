@@ -80,8 +80,8 @@ def apply_kv_compress_patch(model, args, verbose=True) -> Tuple[Any, KVCompress]
             layer_merge_impl=args.layer_merge_impl,
             slerp_t=args.slerp_t,
             slerp_gamma=args.slerp_gamma,
-            merge_key=args.merge_key,
-            merge_value=args.merge_value,
+            merge_key=args.merge_k,
+            merge_value=args.merge_v,
             start_layer=args.start_layer_idx,
             end_layer=args.end_layer_idx if args.end_layer_idx != -1 else model.config.num_hidden_layers - 1,
             # Add quantization parameters
@@ -102,12 +102,6 @@ def apply_kv_compress_patch(model, args, verbose=True) -> Tuple[Any, KVCompress]
 def add_common_args(parser: argparse.ArgumentParser):
     parser.add_argument('--model_name_or_path', type=str, help='model to load')
     parser.add_argument('--flash2', action='store_true', help='whether to use flash-attention2')
-    parser.add_argument('--xKV', action='store_true', help='whether to enable xKV patch')
-    parser.add_argument('--streamingllm', action='store_true', help='whether to enable StreamingLLM patch')
-    parser.add_argument('--snapKV', action='store_true', help='whether to enable snapKV patch')
-    parser.add_argument('--pyramidkv', action='store_true', help='whether to enable pyramidkv patch')
-    parser.add_argument('--kivi', action='store_true', help='whether to enable KIVI patch')
-    parser.add_argument('--quest', action='store_true', help='whether to enable Quest patch')
 
 
     # online svd options
@@ -141,8 +135,8 @@ def add_common_args(parser: argparse.ArgumentParser):
     )
     
     # Merge control
-    parser.add_argument("--merge_key", action="store_true", help="Enable merging for keys")
-    parser.add_argument("--merge_value", action="store_true", help="Enable merging for values")
+    parser.add_argument("--merge_k", action="store_true", help="Enable merging for keys")
+    parser.add_argument("--merge_v", action="store_true", help="Enable merging for values")
     parser.add_argument("--start_layer_idx", type=int, default=0, help="The starting layer index for layer merging")
     parser.add_argument("--end_layer_idx", type=int, default=-1, help="The ending layer index for layer merging. If -1, it will be the last layer.")
     parser.add_argument('--customized_merge_config', type=str, help='custom config file')

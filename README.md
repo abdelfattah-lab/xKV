@@ -203,6 +203,33 @@ python evaluate/eval_acc.py \
 <figcaption>Throughput and Latency Comparison</figcaption>
 </div>
 
+## Efficiency Benchmarks
+We provide kernel-level efficiency benchmarks to measure decode attention latency and SVD prefill overhead across different attention methods and sequence lengths.
+
+### Key Arguments
++ `--warmup`: Number of warmup iterations (default: 3).
++ `--iters`: Number of timed iterations (default: 10).
++ `--output_dir`: Directory to save results (default: `results/efficiency/`).
+
+### Build the CUDA kernel (one-time)
+
+Requires CUDA 12.x. The kernel uses [CUTLASS](https://github.com/NVIDIA/cutlass) (fetched via `git submodule update --init 3rdparty/cutlass`).
+
+```bash
+bash examples/efficiency/build_kernel.sh
+```
+
+### Run benchmarks
+
+```bash
+bash examples/efficiency/run_benchmarks.sh
+```
+
+Results are saved to `results/efficiency/`. To override defaults:
+```bash
+CUDA_VISIBLE_DEVICES=1 WARMUP=5 ITERS=20 bash examples/efficiency/run_benchmarks.sh
+```
+
 ## Citation
 If you find xKV useful or relevant to your project and research, please kindly cite our paper:
 ```bibtex

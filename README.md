@@ -31,11 +31,9 @@ Mohamed S. Abdelfattah<sup>1</sup>
 </div>
 
 ## Updates
+- [2026.07.07]:🚀 We release the efficiency benchmark suite (decode latency, end-to-end throughput, and SVD overhead).
 - [2026.06.15]:🎉 xKV accepted at **ICML 2026**! We release the code of xK-SR and xKV-SR.
 - [2025.03.24]:🚀 We release the 1st version of arXiv and code of xKV
-
-## Upcoming Roadmap
-- [ ] Release end-to-end system and efficiency evaluation.
 
 ## TL;DR
 We introduce xKV, a simple yet effective post-training KV-Cache compression method that jointly factorizes grouped-layer KV-Cache into a shared low-rank subspace, leveraging the well-aligned dominant singular vectors across layers. xKV achieves up to **8× KV-Cache compression** while maintaining accuracy on long-context tasks. Combined with Selective Reconstruction (SR) at decode time, **xKV-SR achieves up to 4.23× end-to-end speedup** over standard attention and **30% higher throughput** over strong baselines at similar accuracy.
@@ -204,9 +202,20 @@ python evaluate/eval_acc.py \
 </div>
 
 ## Efficiency Benchmarks
-We provide kernel-level efficiency benchmarks to measure decode attention latency and SVD prefill overhead across different attention methods and sequence lengths.
+Kernel-level benchmarks measuring decode-step latency and generation throughput across attention methods and sequence lengths. The suite covers three benchmarks:
++ `bench_decode_attn.py` — decode-step attention-kernel latency
++ `bench_e2e_throughput.py` — end-to-end generation throughput (tokens/s)
++ `bench_svd_overhead.py` — prefill-time cross-layer SVD overhead
+
+Compared methods (`--mode`):
++ `fa` — FlashAttention-2 (full-KV baseline)
++ `xkv` — xKV dense reconstruction (all tokens reconstructed)
++ `xkey_sr` — xK-SR (cross-layer key SVD, CPU-offloaded values, selective reconstruction)
++ `xkv_sr` — xKV-SR (cross-layer K+V SVD on GPU, selective reconstruction)
++ `shadowkv` — ShadowKV baseline (per-layer key SVD + sparse retrieval)
 
 ### Key Arguments
++ `--mode`: Attention method(s) to benchmark, or `all` (default: `all`).
 + `--warmup`: Number of warmup iterations (default: 3).
 + `--iters`: Number of timed iterations (default: 10).
 + `--output_dir`: Directory to save results (default: `results/efficiency/`).
@@ -223,6 +232,11 @@ bash examples/efficiency/build_kernel.sh
 
 ```bash
 bash examples/efficiency/run_benchmarks.sh
+```
+
+`run_benchmarks.sh` runs decode-attention latency, SVD overhead, and E2E throughput in sequence. Each benchmark can also be run directly, e.g.:
+```bash
+python efficiency/bench_e2e_throughput.py --mode fa xkv_sr xkey_sr --seqlen 60000
 ```
 
 Results are saved to `results/efficiency/`. To override defaults:
